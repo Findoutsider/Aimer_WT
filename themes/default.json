@@ -1,0 +1,49 @@
+{
+    "meta": {
+        "name": "Default Light",
+        "author": "System",
+        "version": "1.0"
+    },
+    "colors": {
+        "--primary": "#FF9900",
+        "--primary-hover": "#e68a00",
+        "--bg-body": "#F5F7FA",
+        "--bg-card": "#FFFFFF",
+        "--text-main": "#2C3E50",
+        "--text-sec": "#7F8C8D",
+        "--border-color": "#E2E8F0",
+        
+        "--nav-bg": "#FFFFFF",
+        "--nav-item-text": "#7F8C8D",
+        "--nav-item-hover-bg": "rgba(0, 0, 0, 0.05)",
+        "--nav-item-active": "#FF9900",
+        "--nav-item-active-bg": "rgba(255, 153, 0, 0.1)",
+        
+        "--status-waiting": "#F59E0B",
+        "--status-success": "#10B981",
+        "--status-error": "#EF4444",
+        "--status-icon-def": "#E2E8F0",
+        
+        "--mod-card-title": "#2C3E50",
+        "--mod-ver-bg": "rgba(255,153,0,0.1)",
+        "--mod-ver-text": "#FF9900",
+        "--mod-author-text": "#7F8C8D",
+        
+        "--action-trash": "#2C3E50",
+        "--action-trash-hover": "#EF4444",
+        "--action-refresh": "#2C3E50",
+        "--action-refresh-bg": "#2C3E50",
+
+        "--link-bili-normal": "#23ade5",
+        "--link-bili-hover": "#23ade5",
+        "--link-wt-normal": "#2C3E50",
+        "--link-wt-hover": "#2C3E50",
+        "--link-vid-normal": "#EF4444",
+        "--link-vid-hover": "#EF4444",
+        
+        "--tag-tank-bg": "#DCFCE7", "--tag-tank-text": "#16A34A",
+        "--tag-air-bg": "#F3F4F6", "--tag-air-text": "#4B5563",
+        "--tag-naval-bg": "#E0F2FE", "--tag-naval-text": "#0284C7",
+        "--tag-radio-bg": "#FEF9C3", "--tag-radio-text": "#CA8A04"
+    }
+}

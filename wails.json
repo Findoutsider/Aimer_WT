@@ -1,0 +1,10 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "Aimer_WT",
+  "outputfilename": "Aimer_WT",
+  "wailsjsdir": "./frontend",
+  "author": {
+    "name": "Findoutsider",
+    "email": "2275016544@qq.com"
+  }
+}
