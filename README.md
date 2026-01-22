@@ -1,19 +1,11 @@
-# README
+# Aimer WT Go
 
-## About
+这是一个go语言实现的[Aimer WT](https://github.com/AimerSo/Aimer_WT)分支，目前尚未实现全部功能
 
-This template uses plain JS / HTML and CSS.
+## 免责声明
 
-You can configure the project by editing `wails.json`. More information about the project settings can be found
-here: https://wails.io/docs/reference/project-config
+本项目仅用于学习与个人本地管理用途。语音包/音频资源及相关内容版权归原作者或权利方所有。请在遵守相关法律法规与游戏条款的前提下使用。
 
-## Live Development
+## 许可协议
+本项目采用 GNU General Public License v3.0（GPL-3.0）开源，详见 `LICENSE` 文件。
 
-To run in live development mode, run `wails dev` in the project directory. This will run a Vite development
-server that will provide very fast hot reload of your frontend changes. If you want to develop in a browser
-and have access to your Go methods, there is also a dev server that runs on http://localhost:34115. Connect
-to this in your browser, and you can call your Go code from devtools.
-
-## Building
-
-To build a redistributable, production mode package, use `wails build`.
