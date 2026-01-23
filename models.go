@@ -42,37 +42,74 @@ type Mod struct {
 	Capabilities map[string]bool `json:"capabilities"`
 }
 
+// Manifest 结构体定义
+type Manifest struct {
+	InstalledMods map[string]ModInfo `json:"installed_mods"`
+	FileMap       map[string]string  `json:"file_map"`
+}
+
+type ModInfo struct {
+	Files       []string `json:"files"`
+	InstallTime string   `json:"install_time"`
+}
+
 type FolderType string
 
 const (
-	GameFolder     FolderType = "game"
-	PendingFolder  FolderType = "pending"
-	VoiceFolder    FolderType = "voice"
-	SkinFolder     FolderType = "skin"
-	GunScopeFolder FolderType = "gunscope"
+	GameFolder      FolderType = "game"
+	PendingFolder   FolderType = "pending"
+	VoiceFolder     FolderType = "voice"
+	GameVoiceFolder FolderType = "game_voice"
+	SkinFolder      FolderType = "skin"
+	GunScopeFolder  FolderType = "gunscope"
 )
 
 type FolderPath string
 
 var (
-	root               = "data"
-	PendingFolderPath  = FolderPath(filepath.Join(root, "pending"))
-	VoiceFolderPath    = FolderPath(filepath.Join(root, "voice"))
-	SkinFolderPath     = FolderPath(filepath.Join(root, "skin"))
-	GunScopeFolderPath = FolderPath(filepath.Join(root, "gunscope"))
+	root                = "data"
+	PendingFolderPath   = FolderPath(filepath.Join(root, "pending"))
+	VoiceFolderPath     = FolderPath(filepath.Join(root, "voice"))
+	GameVoiceFolderPath = FolderPath(filepath.Join(gamePath, "sound/mod"))
+	SkinFolderPath      = FolderPath(filepath.Join(gamePath, "UserSkins"))
+	GunScopeFolderPath  = FolderPath(filepath.Join(root, "gunscope"))
 )
 
 var FolderPaths = map[FolderType]FolderPath{
-	GameFolder:     FolderPath(gamePath),
-	PendingFolder:  PendingFolderPath,
-	VoiceFolder:    VoiceFolderPath,
-	SkinFolder:     SkinFolderPath,
-	GunScopeFolder: GunScopeFolderPath,
+	GameFolder:      FolderPath(gamePath),
+	PendingFolder:   PendingFolderPath,
+	VoiceFolder:     VoiceFolderPath,
+	GameVoiceFolder: GameVoiceFolderPath,
+	SkinFolder:      SkinFolderPath,
+	GunScopeFolder:  GunScopeFolderPath,
 }
 
 var folders = []FolderPath{
 	PendingFolderPath,
 	VoiceFolderPath,
+	GameVoiceFolderPath,
 	SkinFolderPath,
 	GunScopeFolderPath,
+}
+
+func GetPath(fType FolderType) string {
+	switch fType {
+	case GameFolder:
+		return gamePath
+	case SkinFolder:
+		if gamePath == "" {
+			return filepath.Join(root, "skin")
+		}
+		return filepath.Join(gamePath, "UserSkins")
+	case VoiceFolder:
+		return filepath.Join(root, "voice")
+	case GameVoiceFolder:
+		return filepath.Join(gamePath, "sound/mod")
+	case PendingFolder:
+		return filepath.Join(root, "pending")
+	case GunScopeFolder:
+		return filepath.Join(root, "gunscope")
+	default:
+		return root
+	}
 }

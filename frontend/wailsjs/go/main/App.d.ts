@@ -24,7 +24,7 @@ export function ImportSelectedZip(arg1:string):Promise<void>;
 
 export function ImportZips(arg1:Array<string>,arg2:string):Promise<void>;
 
-export function ImportZipsFromPending(arg1:string):Promise<void>;
+export function ImportZipsFromPending():Promise<void>;
 
 export function InitAppState():Promise<Record<string, any>>;
 

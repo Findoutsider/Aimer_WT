@@ -65,6 +65,7 @@ const app = {
     currentGamePath: "",
     currentModId: null, // 当前正在操作的 mod
     currentTheme: null, // 当前主题对象
+    installedModIds: [], // 所有已安装的 mod ID 列表
 
     // 应用主题的函数
     applyTheme(themeObj) {
@@ -130,13 +131,13 @@ const app = {
     // 初始化
     async init() {
         console.log("App initializing...");
-        this.recoverToSafeState('init');
+        this.recoverToSafeState();
 
         if (!this._safetyHandlersInstalled) {
             this._safetyHandlersInstalled = true;
 
-            window.addEventListener('error', () => this.recoverToSafeState('error'));
-            window.addEventListener('unhandledrejection', () => this.recoverToSafeState('unhandledrejection'));
+            window.addEventListener('error', () => this.recoverToSafeState());
+            window.addEventListener('unhandledrejection', () => this.recoverToSafeState());
             document.addEventListener('keydown', (e) => {
                 if (e.key !== 'Escape') return;
                 const openModal = document.querySelector('.modal-overlay.show');
@@ -504,7 +505,7 @@ const app = {
         }
     },
 
-    recoverToSafeState(reason) {
+    recoverToSafeState() {
         try {
             // 如果协议窗口正在显示，不要关闭它
             const disclaimerModal = document.getElementById('modal-disclaimer');
@@ -519,7 +520,7 @@ const app = {
             
             // 如果协议窗口正在显示，不要切换标签页
             if (!isDisclaimerShowing) {
-                this.switchTab('home');
+            this.switchTab('home');
             }
         } catch (e) {
         }
@@ -779,8 +780,8 @@ const app = {
 
         const safeNote = (mod.note || '暂无介绍').replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
-        // [核心逻辑] 判断是否是当前已加载的语音包
-        const isInstalled = (mod.id === app.installedModId);
+        // [核心逻辑] 判断是否是当前已加载的语音包（支持多个 mod 同时安装）
+        const isInstalled = app.installedModIds && app.installedModIds.includes(mod.id);
 
         // 根据状态决定按钮样式和图标
         // 已安装: active 样式, check 图标, title="当前已加载"
@@ -915,16 +916,24 @@ const app = {
         el.classList.add('show');
     },
 
-    importSelectedZip() {
+    importSelectedZip(type) {
         app.closeModal('modal-import');
+        // 显示加载动画
+        if (typeof MinimalistLoading !== 'undefined') {
+            MinimalistLoading.show(false, "正在准备导入...");
+        }
         // 调用后端选择文件接口
-        App.ImportSelectedZip();
+        App.ImportSelectedZip(type);
     },
 
-    importPendingZips() {
+    importPendingZips(type) {
         app.closeModal('modal-import');
+        // 显示加载动画
+        if (typeof MinimalistLoading !== 'undefined') {
+            MinimalistLoading.show(false, "正在准备导入...");
+        }
         // 调用后端批量导入接口 (原 import_zips)
-        App.ImportZips();
+        App.ImportZipsFromPending();
     },
 
     openFolder(type) {
@@ -972,14 +981,25 @@ const app = {
     // 安装/还原成功回调
     onInstallSuccess(modName) {
         console.log("Install Success:", modName);
-        this.installedModId = modName;
-        if (this.modCache) this.renderList(this.modCache);
+        // 将新安装的 mod 添加到已安装列表（如果不存在）
+        if (!this.installedModIds) {
+            this.installedModIds = [];
+        }
+        if (!this.installedModIds.includes(modName)) {
+            this.installedModIds.push(modName);
+        }
+        // 刷新列表以更新所有按钮状态
+        this.refreshVoice();
+        this.showInfoToast("安装成功", `语音包 ${modName} 已成功安装`, 3000);
     },
 
     onRestoreSuccess() {
         console.log("Restore Success");
-        this.installedModId = null;
-        if (this.modCache) this.renderList(this.modCache);
+        // 清空所有已安装的 mod 列表
+        this.installedModIds = [];
+        // 刷新列表以更新所有按钮状态
+        this.refreshVoice();
+        this.showInfoToast("还原成功", "游戏已还原为纯净模式", 3000);
     }
 };
 
@@ -1172,7 +1192,7 @@ app.checkDisclaimer = async function () {
                 // 确保协议窗口在最上层
                 modal.style.zIndex = '99999';
                 // 直接显示，不需要延迟
-                modal.classList.add('show');
+            modal.classList.add('show');
                 
                 // 标记协议窗口正在显示，防止被其他逻辑关闭
                 app._disclaimerShowing = true;
@@ -1208,7 +1228,7 @@ app.disclaimerAgree = async function () {
     // 关闭弹窗
     const modal = document.getElementById('modal-disclaimer');
     if (modal) {
-        modal.classList.remove('show');
+    modal.classList.remove('show');
     }
     
     // 清除标记
@@ -1282,7 +1302,7 @@ app.handleShortcuts = function (e) {
     }
 };
 
-    // 启动 (稍作修改: init 里面调用 checkDisclaimer)
+// 启动 (稍作修改: init 里面调用 checkDisclaimer)
 app.init = async function () {
     document.addEventListener('DOMContentLoaded', bindEventListeners);
 
@@ -1292,8 +1312,8 @@ app.init = async function () {
     if (!this._safetyHandlersInstalled) {
         this._safetyHandlersInstalled = true;
 
-        window.addEventListener('error', () => this.recoverToSafeState('error'));
-        window.addEventListener('unhandledrejection', () => this.recoverToSafeState('unhandledrejection'));
+        window.addEventListener('error', () => this.recoverToSafeState());
+        window.addEventListener('unhandledrejection', () => this.recoverToSafeState());
         document.addEventListener('keydown', (e) => {
             if (e.key !== 'Escape') return;
             const openModal = document.querySelector('.modal-overlay.show');
@@ -1317,8 +1337,21 @@ app.init = async function () {
             path_valid: false,
             active_theme: "default.json",
             theme: "Light",
+            installed_mods: [],
         };
         this.updatePathUI(state.game_path, state.path_valid);
+        
+        // 设置所有已安装的 mod 列表
+        if (state.installed_mods && Array.isArray(state.installed_mods)) {
+            this.installedModIds = state.installed_mods;
+        } else {
+            this.installedModIds = [];
+        }
+        
+        // 设置当前已安装的 mod
+        if (state.current_mod) {
+            this.installedModId = state.current_mod;
+        }
 
         // 加载主题列表并应用上次的选择
         await this.loadThemeList();
@@ -1383,6 +1416,35 @@ function bindEventListeners() {
     EventsOn("error_tip", (title, message, duration=5000) => {
         window.app.showErrorToast(title, message, duration)
     });
+    EventsOn("refresh_voice", () => {
+        window.app.refreshVoice().then()
+    });
+    EventsOn("ev_install_success", (modId) => {
+        window.app.onInstallSuccess(modId);
+    });
+    EventsOn("ev_restore_success", () => {
+        window.app.onRestoreSuccess();
+    });
+    EventsOn("ev_import_progress", (progress, message) => {
+        // 更新导入进度
+        if (typeof MinimalistLoading !== 'undefined') {
+            MinimalistLoading.update(progress, message);
+        }
+    });
+    EventsOn("ev_import_finished", () => {
+        // 导入完成，隐藏加载动画
+        if (typeof MinimalistLoading !== 'undefined') {
+            setTimeout(() => {
+                MinimalistLoading.hide();
+            }, 500); // 延迟500ms隐藏，让用户看到100%完成
+        }
+    });
+    EventsOn("ev_import_cancelled", () => {
+        // 导入取消，立即隐藏加载动画
+        if (typeof MinimalistLoading !== 'undefined') {
+            MinimalistLoading.hide();
+        }
+    });
     // 导航按钮
     document.getElementById('btn-home')?.addEventListener('click', () => app.switchTab('home'));
     document.getElementById('btn-lib')?.addEventListener('click', () => app.switchTab('lib'));
@@ -1436,8 +1498,8 @@ function bindEventListeners() {
     // btn-confirm-install 已经在 script.js 中绑定过了
 
     // 导入模态框
-    document.getElementById('btn-import-selected')?.addEventListener('click', () => app.importSelectedZip());
-    document.getElementById('btn-import-pending')?.addEventListener('click', () => app.importPendingZips());
+    document.getElementById('btn-import-selected')?.addEventListener('click', () => app.importSelectedZip("voice"));
+    document.getElementById('btn-import-pending')?.addEventListener('click', () => app.importPendingZips("pending"));
     document.getElementById('btn-cancel-import')?.addEventListener('click', () => app.closeModal('modal-import'));
 
     // 免责声明

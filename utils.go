@@ -19,13 +19,11 @@ import (
 func ReadJSON[T any](filePath string) (T, error) {
 	var data T
 
-	// 1. 读取原始字节流
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return data, err
 	}
 
-	// 2. 将字节流解析为结构体
 	err = json.Unmarshal(content, &data)
 	if err != nil {
 		return data, err
@@ -35,13 +33,11 @@ func ReadJSON[T any](filePath string) (T, error) {
 }
 
 func WriteJSON(filePath string, data any) error {
-	// 1. 将对象转为带缩进的 JSON 字节流 (Indent 为 4 个空格)
 	content, err := json.MarshalIndent(data, "", "    ")
 	if err != nil {
 		return err
 	}
 
-	// 2. 写入物理文件 (0644 是标准的读写权限)
 	return os.WriteFile(filePath, content, 0644)
 }
 
@@ -162,16 +158,15 @@ func getLogicalDrives() []string {
 	return drives
 }
 
-func OpenFolder(folderType FolderType) error {
+func OpenFolder(folder string) error {
 	var cmd *exec.Cmd
-	path := string(getFolderPath(folderType))
 	switch runtime.GOOS {
 	case "windows":
-		cmd = exec.Command("explorer", path)
+		cmd = exec.Command("explorer", folder)
 	case "darwin": // macOS
-		cmd = exec.Command("open", path)
+		cmd = exec.Command("open", folder)
 	default: // Linux
-		cmd = exec.Command("xdg-open", path)
+		cmd = exec.Command("xdg-open", folder)
 	}
 
 	return cmd.Start()
@@ -477,11 +472,11 @@ func DetectModCapabilities(modPath string) map[string]bool {
 
 // GetModFolders 获取 mod 的子文件夹列表
 func GetModFolders(modPath string) []map[string]any {
-	var folders []map[string]any
+	var f []map[string]any
 
 	entries, err := os.ReadDir(modPath)
 	if err != nil {
-		return folders
+		return f
 	}
 
 	for _, entry := range entries {
@@ -501,7 +496,7 @@ func GetModFolders(modPath string) []map[string]any {
 
 		if hasBankFile {
 			folderType := DetectFolderType(entry.Name(), subDirPath)
-			folders = append(folders, map[string]any{
+			f = append(f, map[string]any{
 				"path": entry.Name(),
 				"type": folderType,
 			})
@@ -517,13 +512,13 @@ func GetModFolders(modPath string) []map[string]any {
 		}
 	}
 	if hasRootBank {
-		folders = append([]map[string]any{{
+		f = append([]map[string]any{{
 			"path": "根目录",
 			"type": "folder",
-		}}, folders...)
+		}}, f...)
 	}
 
-	return folders
+	return f
 }
 
 // DetectFolderType 检测文件夹类型
@@ -543,4 +538,288 @@ func DetectFolderType(folderName, folderPath string) string {
 		return "radio"
 	}
 	return "folder"
+}
+
+func ReadZipFromFolders(folderPath string) []string {
+	var f []string
+	entries, err := os.ReadDir(folderPath)
+	if err != nil {
+		return f
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(strings.ToLower(entry.Name()), ".zip") {
+			f = append(f, filepath.Join(folderPath, entry.Name()))
+		}
+	}
+	return f
+}
+
+// ensureGameVoiceFolder 确保游戏语音文件夹存在
+func ensureGameVoiceFolder(gameVoicePath string) error {
+	if err := os.MkdirAll(gameVoicePath, 0755); err != nil {
+		Error("创建游戏语音文件夹失败: %v", err)
+		return err
+	}
+	return nil
+}
+
+// loadOrCreateManifest 加载或创建 manifest.json
+func loadOrCreateManifest(manifestPath string) (*Manifest, error) {
+	var manifest Manifest
+
+	if PathExists(manifestPath) {
+		manifestData, err := ReadJSON[Manifest](manifestPath)
+		if err != nil {
+			Warn("读取 manifest.json 失败，将创建新文件: %v", err)
+			manifest = Manifest{
+				InstalledMods: make(map[string]ModInfo),
+				FileMap:       make(map[string]string),
+			}
+		} else {
+			manifest = manifestData
+			// 确保 map 已初始化
+			if manifest.InstalledMods == nil {
+				manifest.InstalledMods = make(map[string]ModInfo)
+			}
+			if manifest.FileMap == nil {
+				manifest.FileMap = make(map[string]string)
+			}
+		}
+	} else {
+		// 创建空的 manifest
+		manifest = Manifest{
+			InstalledMods: make(map[string]ModInfo),
+			FileMap:       make(map[string]string),
+		}
+		if err := WriteJSON(manifestPath, manifest); err != nil {
+			Error("创建 manifest.json 失败: %v", err)
+			return nil, err
+		}
+	}
+
+	return &manifest, nil
+}
+
+// parseSelectedFolders 解析用户选择的文件夹列表
+func parseSelectedFolders(selectionJson string) ([]string, error) {
+	var selectedFolders []string
+	if err := json.Unmarshal([]byte(selectionJson), &selectedFolders); err != nil {
+		Error("解析选择列表失败: %v", err)
+		return nil, err
+	}
+	return selectedFolders, nil
+}
+
+// collectModFiles 收集要安装的文件列表
+func collectModFiles(modPath string, selectedFolders []string) []string {
+	var filesToInstall []string
+
+	for _, folder := range selectedFolders {
+		var sourcePath string
+		if folder == "根目录" {
+			sourcePath = modPath
+		} else {
+			sourcePath = filepath.Join(modPath, folder)
+		}
+
+		// 遍历文件夹下的所有 .bank 文件
+		err := filepath.Walk(sourcePath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if !info.IsDir() && strings.HasSuffix(strings.ToLower(info.Name()), ".bank") {
+				fileName := filepath.Base(path)
+				filesToInstall = append(filesToInstall, fileName)
+			}
+			return nil
+		})
+		if err != nil {
+			Warn("遍历文件夹 %s 失败: %v", folder, err)
+		}
+	}
+
+	return filesToInstall
+}
+
+// checkFileConflicts 检查文件冲突
+func checkFileConflicts(filesToInstall []string, manifest *Manifest, modId string) []map[string]any {
+	var conflicts []map[string]any
+
+	for _, fileName := range filesToInstall {
+		if existingModId, exists := manifest.FileMap[fileName]; exists {
+			if existingModId != modId {
+				conflicts = append(conflicts, map[string]any{
+					"file":         fileName,
+					"existing_mod": existingModId,
+					"new_mod":      modId,
+				})
+			}
+			// 如果 existingModId == modId，说明是同一个 mod 重新安装
+		}
+	}
+
+	return conflicts
+}
+
+// installModFiles 安装文件并更新 manifest
+func installModFiles(modPath, gameVoicePath string, selectedFolders []string, manifest *Manifest, modId string) ([]string, error) {
+	// 如果同一个 mod 重新安装，先清理旧的文件记录
+	if oldModInfo, exists := manifest.InstalledMods[modId]; exists {
+		// 从 file_map 中移除旧的文件记录
+		for _, oldFile := range oldModInfo.Files {
+			// 只有当 file_map 中该文件属于当前 mod 时才删除
+			if manifest.FileMap[oldFile] == modId {
+				delete(manifest.FileMap, oldFile)
+			}
+		}
+	}
+
+	var installedFiles []string
+
+	for _, folder := range selectedFolders {
+		var sourcePath string
+		if folder == "根目录" {
+			sourcePath = modPath
+		} else {
+			sourcePath = filepath.Join(modPath, folder)
+		}
+
+		err := filepath.Walk(sourcePath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if !info.IsDir() && strings.HasSuffix(strings.ToLower(info.Name()), ".bank") {
+				fileName := filepath.Base(path)
+				destPath := filepath.Join(gameVoicePath, fileName)
+
+				if err := copyFile(path, destPath); err != nil {
+					Error("复制文件失败 %s -> %s: %v", path, destPath, err)
+					return nil
+				}
+
+				installedFiles = append(installedFiles, fileName)
+				manifest.FileMap[fileName] = modId
+			}
+			return nil
+		})
+		if err != nil {
+			Warn("处理文件夹 %s 失败: %v", folder, err)
+		}
+	}
+
+	return installedFiles, nil
+}
+
+// saveManifest 保存 manifest.json
+func saveManifest(manifestPath string, manifest *Manifest, modId string, installedFiles []string) error {
+	// 更新 installed_mods
+	manifest.InstalledMods[modId] = ModInfo{
+		Files:       installedFiles,
+		InstallTime: time.Now().Format(time.RFC3339Nano),
+	}
+
+	// 保存 manifest.json
+	if err := WriteJSON(manifestPath, manifest); err != nil {
+		Error("保存 manifest.json 失败: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+// copyFile 复制文件
+func copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	return err
+}
+
+// ensureEnableModFlag 确保 config.blk 中存在 enable_mod 标记
+// enabled=true  -> enable_mod:b=yes
+// enabled=false -> enable_mod:b=no
+func ensureEnableModFlag(configPath string, enabled bool) error {
+	if !PathExists(configPath) {
+		return nil
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return err
+	}
+
+	text := string(data)
+	targetValue := "yes"
+	if !enabled {
+		targetValue = "no"
+	}
+
+	lines := strings.Split(text, "\n")
+	foundLine := false
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "enable_mod:b=") {
+			// 保留原来的缩进
+			prefix := line[:strings.Index(line, strings.TrimLeft(line, " \t"))]
+			lines[i] = fmt.Sprintf("%senable_mod:b=%s", prefix, targetValue)
+			foundLine = true
+			break
+		}
+	}
+
+	if foundLine {
+		newText := strings.Join(lines, "\n")
+		return os.WriteFile(configPath, []byte(newText), 0644)
+	}
+
+	// 没有找到 enable_mod 行
+	// 尝试插入到 sound{ 块内，如果没有 sound{，则追加一个完整的 sound 块
+	if idx := strings.Index(text, "sound{"); idx != -1 {
+		insertPos := idx + len("sound{")
+		insertLine := fmt.Sprintf("\n  enable_mod:b=%s", targetValue)
+		newText := text[:insertPos] + insertLine + text[insertPos:]
+		return os.WriteFile(configPath, []byte(newText), 0644)
+	}
+
+	// 没有 sound 块，追加一个完整的块
+	block := fmt.Sprintf("\n\nsound{\n  fmod_sound_enable:b=yes\n  speakerMode:t=\"auto\"\n  enable_mod:b=%s\n}\n", targetValue)
+	newText := text + block
+	return os.WriteFile(configPath, []byte(newText), 0644)
+}
+
+// getCurrentInstalledMods 获取所有当前已安装的 mod（从 manifest 中获取）
+func getCurrentInstalledMods() []string {
+	gameVoicePath := GetPath(GameVoiceFolder)
+	manifestPath := filepath.Join(gameVoicePath, ".manifest.json")
+
+	if !PathExists(manifestPath) {
+		return []string{}
+	}
+
+	manifest, err := ReadJSON[Manifest](manifestPath)
+	if err != nil {
+		return []string{}
+	}
+
+	// 返回所有已安装的 mod ID 列表
+	var modIds []string
+	for modId := range manifest.InstalledMods {
+		modIds = append(modIds, modId)
+	}
+
+	return modIds
 }

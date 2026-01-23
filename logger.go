@@ -47,7 +47,6 @@ func SetLogContext(ctx context.Context) {
 func Scan(format string, v ...any) {
 	message := fmt.Sprintf(format, v...)
 
-	// 只推送到前端，不占用磁盘 IO
 	if appCtx != nil {
 		runtime.EventsEmit(appCtx, "ev_update_scan", message)
 	}

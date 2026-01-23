@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,12 +112,14 @@ func (a *App) InitAppState() map[string]any {
 		Warn("默认路径下不存在游戏")
 	}
 
+	installedMods := getCurrentInstalledMods()
+
 	return map[string]any{
-		"game_path":    path,
-		"path_valid":   isVerify,
-		"theme":        theme,
-		"active_theme": GetActiveTheme(),
-		"current_mod":  vp.GetString("current_mod"),
+		"game_path":      path,
+		"path_valid":     isVerify,
+		"theme":          theme,
+		"active_theme":   GetActiveTheme(),
+		"installed_mods": installedMods, // 返回所有已安装的 mod 列表
 	}
 }
 
@@ -282,13 +285,17 @@ func (a *App) ImportSelectedZip(_type string) {
 	})
 	if err != nil || selectedZip == "" {
 		Error("未选择压缩包")
+		runtime.EventsEmit(a.ctx, "ev_import_cancelled")
 		return
 	}
 	a.ImportZips([]string{selectedZip}, _type)
 }
 
-func (a *App) ImportZipsFromPending(_type string) {
-
+func (a *App) ImportZipsFromPending() {
+	path := GetPath(PendingFolder)
+	Info(path)
+	zipFromFolders := ReadZipFromFolders(path)
+	a.ImportZips(zipFromFolders, "voice")
 }
 
 // ImportZips 批量导入 ZIP
@@ -310,48 +317,161 @@ func (a *App) ImportZips(selectedZips []string, typeStr string) {
 		TargetDir: targetDir,
 		OnProgress: func(current, total int, filename string) {
 			Scan("进度 (%d/%d): %s", current, total, filename)
+			progress := int(float64(current) / float64(total) * 100)
+			runtime.EventsEmit(a.ctx, "ev_import_progress", progress, fmt.Sprintf("正在导入 %s (%d/%d)", filename, current, total))
+			a.showInfoTip("导入中", fmt.Sprintf("正在导入 %s", filename), 3000)
 		},
 		OnLog: func(level, message string) {
 			Log(level, message)
 		},
 		OnFinished: func() {
 			Scan("所有任务处理完毕")
+			runtime.EventsEmit(a.ctx, "ev_import_progress", 100, "导入完成")
+			a.showInfoTip("导入完成", "导入完成", 3000)
 			runtime.EventsEmit(a.ctx, "ev_import_finished", true)
+			a.refreshVoice()
 		},
 	})
 }
 
 // OpenFolder 打开文件夹
 func (a *App) OpenFolder(folderType string) {
-	// TODO: 根据类型打开对应文件夹
-	Info("打开 %s", folderType)
-	OpenFolder(FolderType(folderType))
+	OpenFolder(GetPath(FolderType(folderType)))
 }
 
 // DeleteMod 删除语音包
 func (a *App) DeleteMod(modId string) bool {
-	// TODO: 实现删除语音包逻辑
-	logger.Printf("删除语音包功能待实现: %s", modId)
-	return false
+	err := os.RemoveAll(filepath.Join(GetPath(VoiceFolder), modId))
+	if err != nil {
+		Info("删除失败: %v", err)
+		a.showErrorTip("删除失败", err.Error(), 3000)
+		return false
+	}
+	Info("已删除 %s", modId)
+	a.showInfoTip("删除成功", "已删除 "+modId, 3000)
+	return true
 }
 
-// CheckInstallConflicts 检查安装冲突
+// CheckInstallConflicts 检查安装冲突（只检查，不安装）
 func (a *App) CheckInstallConflicts(modId string, selectionJson string) []map[string]any {
-	// TODO: 实现冲突检查逻辑
-	logger.Printf("检查安装冲突功能待实现: %s", modId)
-	return []map[string]any{}
+	gameVoicePath := GetPath(GameVoiceFolder)
+	voicePath := GetPath(VoiceFolder)
+	modPath := filepath.Join(voicePath, modId)
+	manifestPath := filepath.Join(gameVoicePath, ".manifest.json")
+
+	if err := ensureGameVoiceFolder(gameVoicePath); err != nil {
+		return []map[string]any{
+			{"file": "", "existing_mod": "", "new_mod": modId, "error": err.Error()},
+		}
+	}
+
+	manifest, err := loadOrCreateManifest(manifestPath)
+	if err != nil {
+		return []map[string]any{
+			{"file": "", "existing_mod": "", "new_mod": modId, "error": err.Error()},
+		}
+	}
+
+	selectedFolders, err := parseSelectedFolders(selectionJson)
+	if err != nil {
+		return []map[string]any{
+			{"file": "", "existing_mod": "", "new_mod": modId, "error": "解析选择列表失败"},
+		}
+	}
+
+	filesToInstall := collectModFiles(modPath, selectedFolders)
+
+	conflicts := checkFileConflicts(filesToInstall, manifest, modId)
+	return conflicts
 }
 
 // InstallMod 安装语音包
 func (a *App) InstallMod(modId string, selectionJson string) {
-	// TODO: 实现安装语音包逻辑
-	logger.Printf("安装语音包功能待实现: %s", modId)
+	gameVoicePath := GetPath(GameVoiceFolder)
+	voicePath := GetPath(VoiceFolder)
+	modPath := filepath.Join(voicePath, modId)
+	manifestPath := filepath.Join(gameVoicePath, ".manifest.json")
+
+	if err := ensureGameVoiceFolder(gameVoicePath); err != nil {
+		Error("创建游戏语音文件夹失败: %v", err)
+		a.showErrorTip("安装失败", "创建游戏语音文件夹失败", 5000)
+		return
+	}
+
+	manifest, err := loadOrCreateManifest(manifestPath)
+	if err != nil {
+		Error("加载 manifest 失败: %v", err)
+		a.showErrorTip("安装失败", "加载 manifest 失败", 5000)
+		return
+	}
+
+	selectedFolders, err := parseSelectedFolders(selectionJson)
+	if err != nil {
+		Error("解析选择列表失败: %v", err)
+		a.showErrorTip("安装失败", "解析选择列表失败", 5000)
+		return
+	}
+
+	installedFiles, err := installModFiles(modPath, gameVoicePath, selectedFolders, manifest, modId)
+	if err != nil {
+		Error("安装文件失败: %v", err)
+		a.showErrorTip("安装失败", err.Error(), 5000)
+		return
+	}
+
+	if err := saveManifest(manifestPath, manifest, modId, installedFiles); err != nil {
+		Error("保存 manifest 失败: %v", err)
+		a.showErrorTip("安装失败", "保存 manifest 失败", 5000)
+		return
+	}
+
+	// 确保 config.blk 中已开启 enable_mod:b=yes
+	configPath := filepath.Join(gamePath, "config.blk")
+	if err := ensureEnableModFlag(configPath, true); err != nil {
+		Warn("更新 config.blk 失败: %v", err)
+	}
+
+	runtime.EventsEmit(a.ctx, "ev_install_success", modId)
+	Success("成功安装 mod %s，共安装 %d 个文件", modId, len(installedFiles))
 }
 
 // RestoreGame 还原游戏
 func (a *App) RestoreGame() {
-	// TODO: 实现还原游戏逻辑
-	logger.Println("还原游戏功能待实现")
+	gameVoicePath := GetPath(GameVoiceFolder)
+	manifestPath := filepath.Join(gameVoicePath, ".manifest.json")
+
+	if PathExists(gameVoicePath) {
+		entries, err := os.ReadDir(gameVoicePath)
+		if err == nil {
+			for _, entry := range entries {
+				if entry.Name() == ".manifest.json" {
+					continue
+				}
+				entryPath := filepath.Join(gameVoicePath, entry.Name())
+				if err := os.RemoveAll(entryPath); err != nil {
+					Warn("删除文件失败: %s, %v", entryPath, err)
+				}
+			}
+		}
+	}
+
+	emptyManifest := Manifest{
+		InstalledMods: make(map[string]ModInfo),
+		FileMap:       make(map[string]string),
+	}
+	if err := WriteJSON(manifestPath, emptyManifest); err != nil {
+		Error("清空 manifest.json 失败: %v", err)
+	}
+
+	configPath := filepath.Join(gamePath, "config.blk")
+	if PathExists(configPath) {
+		if err := ensureEnableModFlag(configPath, false); err != nil {
+			Warn("更新 config.blk 失败: %v", err)
+		}
+	}
+
+	runtime.EventsEmit(a.ctx, "ev_restore_success")
+	Success("游戏已还原为纯净模式")
 }
 
 // CheckFirstRun 检查首次运行
@@ -369,4 +489,29 @@ func (a *App) AgreeToTerms(version string) {
 	vp.Set("agreement_version", version)
 	vp.WriteConfig()
 	Info("已同意条款，版本: %s", version)
+}
+
+func (a *App) showInfoTip(title string, content string, duration uint) {
+	if duration == 0 {
+		duration = 5000
+	}
+	runtime.EventsEmit(a.ctx, "info_tip", title, content, duration)
+}
+
+func (a *App) showWarnTip(title string, content string, duration uint) {
+	if duration == 0 {
+		duration = 5000
+	}
+	runtime.EventsEmit(a.ctx, "warn_tip", title, content, duration)
+}
+
+func (a *App) showErrorTip(title string, content string, duration uint) {
+	if duration == 0 {
+		duration = 5000
+	}
+	runtime.EventsEmit(a.ctx, "error_tip", title, content, duration)
+}
+
+func (a *App) refreshVoice() {
+	runtime.EventsEmit(a.ctx, "refresh_voice")
 }

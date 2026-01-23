@@ -46,8 +46,8 @@ export function ImportZips(arg1, arg2) {
   return window['go']['main']['App']['ImportZips'](arg1, arg2);
 }
 
-export function ImportZipsFromPending(arg1) {
-  return window['go']['main']['App']['ImportZipsFromPending'](arg1);
+export function ImportZipsFromPending() {
+  return window['go']['main']['App']['ImportZipsFromPending']();
 }
 
 export function InitAppState() {
