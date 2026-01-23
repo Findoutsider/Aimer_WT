@@ -352,6 +352,150 @@ const app = {
         modal.classList.add('show');
     },
 
+    // 显示错误提示框 (Toast 风格)
+    showErrorToast(title, message, duration = 5000) {
+        const toast = document.getElementById('toast-error');
+        if (!toast) {
+            console.error('toast-error not found, falling back to showAlert');
+            this.showAlert(title || '错误', message, 'error');
+            return;
+        }
+
+        const titleEl = toast.querySelector('.toast-error-title');
+        const messageEl = toast.querySelector('.toast-error-message');
+
+        if (titleEl) titleEl.textContent = title || '错误';
+        if (messageEl) messageEl.textContent = message || '';
+
+        // 移除之前的隐藏状态
+        toast.classList.remove('hiding');
+        toast.classList.add('show');
+
+        // 自动隐藏
+        if (this._errorToastTimeout) {
+            clearTimeout(this._errorToastTimeout);
+        }
+
+        this._errorToastTimeout = setTimeout(() => {
+            this.hideErrorToast();
+        }, duration);
+    },
+
+    // 隐藏错误提示框
+    hideErrorToast() {
+        const toast = document.getElementById('toast-error');
+        if (!toast) return;
+
+        // 先添加 hiding 类触发动画，保持 show 类以确保元素可见
+        toast.classList.add('hiding');
+
+        // 等待动画结束后移除所有类并隐藏
+        setTimeout(() => {
+            toast.classList.remove('hiding', 'show');
+        }, 300);
+
+        if (this._errorToastTimeout) {
+            clearTimeout(this._errorToastTimeout);
+            this._errorToastTimeout = null;
+        }
+    },
+
+    // 显示警告提示框 (Toast 风格)
+    showWarnToast(title, message, duration = 5000) {
+        const toast = document.getElementById('toast-warn');
+        if (!toast) {
+            console.error('toast-warn not found, falling back to showAlert');
+            this.showAlert(title || '警告', message, 'warn');
+            return;
+        }
+
+        const titleEl = toast.querySelector('.toast-warn-title');
+        const messageEl = toast.querySelector('.toast-warn-message');
+
+        if (titleEl) titleEl.textContent = title || '警告';
+        if (messageEl) messageEl.textContent = message || '';
+
+        // 移除之前的隐藏状态
+        toast.classList.remove('hiding');
+        toast.classList.add('show');
+
+        // 自动隐藏
+        if (this._warnToastTimeout) {
+            clearTimeout(this._warnToastTimeout);
+        }
+
+        this._warnToastTimeout = setTimeout(() => {
+            this.hideWarnToast();
+        }, duration);
+    },
+
+    // 隐藏警告提示框
+    hideWarnToast() {
+        const toast = document.getElementById('toast-warn');
+        if (!toast) return;
+
+        // 先添加 hiding 类触发动画，保持 show 类以确保元素可见
+        toast.classList.add('hiding');
+
+        // 等待动画结束后移除所有类并隐藏
+        setTimeout(() => {
+            toast.classList.remove('hiding', 'show');
+        }, 300);
+
+        if (this._warnToastTimeout) {
+            clearTimeout(this._warnToastTimeout);
+            this._warnToastTimeout = null;
+        }
+    },
+
+    // 显示提示提示框 (Toast 风格)
+    showInfoToast(title, message, duration = 5000) {
+        const toast = document.getElementById('toast-info');
+        if (!toast) {
+            console.error('toast-info not found, falling back to showAlert');
+            this.showAlert(title || '提示', message, 'info');
+            return;
+        }
+
+        const titleEl = toast.querySelector('.toast-info-title');
+        const messageEl = toast.querySelector('.toast-info-message');
+
+        if (titleEl) titleEl.textContent = title || '提示';
+        if (messageEl) messageEl.textContent = message || '';
+
+        // 移除之前的隐藏状态
+        toast.classList.remove('hiding');
+        toast.classList.add('show');
+
+        // 自动隐藏
+        if (this._infoToastTimeout) {
+            clearTimeout(this._infoToastTimeout);
+        }
+
+        this._infoToastTimeout = setTimeout(() => {
+            this.hideInfoToast();
+        }, duration);
+    },
+
+    // 隐藏提示提示框
+    hideInfoToast() {
+        const toast = document.getElementById('toast-info');
+        if (!toast) return;
+
+        // 先添加 hiding 类触发动画，保持 show 类以确保元素可见
+        toast.classList.add('hiding');
+
+        // 等待动画结束后移除所有类并隐藏
+        setTimeout(() => {
+            toast.classList.remove('hiding', 'show');
+        }, 300);
+
+        if (this._infoToastTimeout) {
+            clearTimeout(this._infoToastTimeout);
+            this._infoToastTimeout = null;
+        }
+    },
+
     recoverToSafeState(reason) {
         try {
             this.forceHideAllModals();
@@ -520,7 +664,7 @@ const app = {
 
         modsToRender.forEach((mod, index) => {
             const card = this.createModCard(mod);
-            // 2025 年最优雅的交错入场效果
+            // 2025 年最优雅的交错入场效果 -> 已经 2026 年了
             // 限制最大延迟，防止长列表加载太慢
             const delay = Math.min(index * 0.05, 0.5);
             card.style.animationDelay = `${delay}s`;
@@ -563,7 +707,8 @@ const app = {
         div.className = 'card mod-card';
         div.dataset.id = mod.id; // 添加 ID 标识，方便动画定位
 
-        const imgUrl = mod.cover_url || '';
+        // 如果 cover_url 为空，使用默认图片
+        const imgUrl = mod.cover_url || 'assets/card_image.png';
         let tagsHtml = '';
 
         // [Fix] 使用 UI_CONFIG 替代硬编码逻辑
@@ -696,7 +841,13 @@ const app = {
         const modImg = div.querySelector('.mod-img');
         if (modImg) {
             modImg.addEventListener('error', function() {
-                this.style.display = 'none';
+                // 如果图片加载失败，使用默认图片
+                if (this.src && !this.src.includes('card_image.png')) {
+                    this.src = 'assets/card_image.png';
+                } else {
+                    // 如果默认图片也加载失败，隐藏图片
+                    this.style.display = 'none';
+                }
             });
         }
 
@@ -953,8 +1104,7 @@ if (btnConfirmInstall) {
         MinimalistLoading.show(false, "正在准备安装...");
     }
 
-    // [关键修复] 使用 JSON 字符串传递数组，避免 pywebview 打包后序列化问题
-        App.InstallMod(app.currentModId, JSON.stringify(selection));
+    App.InstallMod(app.currentModId, JSON.stringify(selection));
     app.closeModal('modal-install');
     app.switchTab('home'); // 跳转回主页看日志
     });
@@ -1180,6 +1330,15 @@ function bindEventListeners() {
     EventsOn("search_fail", () => {
         window.app.onSearchFail();
     });
+    EventsOn("info_tip", (title, message, duration=5000) => {
+        window.app.showInfoToast(title, message, duration)
+    });
+    EventsOn("warn_tip", (title, message, duration=5000) => {
+        window.app.showWarnToast(title, message, duration)
+    });
+    EventsOn("error_tip", (title, message, duration=5000) => {
+        window.app.showErrorToast(title, message, duration)
+    });
     // 导航按钮
     document.getElementById('btn-home')?.addEventListener('click', () => app.switchTab('home'));
     document.getElementById('btn-lib')?.addEventListener('click', () => app.switchTab('lib'));
@@ -1243,6 +1402,15 @@ function bindEventListeners() {
 
     // 提示弹窗
     document.getElementById('btn-alert-ok')?.addEventListener('click', () => app.closeModal('modal-alert'));
+
+    // 错误提示框关闭按钮
+    document.getElementById('toast-error-close')?.addEventListener('click', () => app.hideErrorToast());
+
+    // 警告提示框关闭按钮
+    document.getElementById('toast-warn-close')?.addEventListener('click', () => app.hideWarnToast());
+
+    // 提示提示框关闭按钮
+    document.getElementById('toast-info-close')?.addEventListener('click', () => app.hideInfoToast());
 }
 
 app.init();

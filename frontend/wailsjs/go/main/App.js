@@ -38,12 +38,16 @@ export function GetVoiceList() {
   return window['go']['main']['App']['GetVoiceList']();
 }
 
-export function ImportSelectedZip() {
-  return window['go']['main']['App']['ImportSelectedZip']();
+export function ImportSelectedZip(arg1) {
+  return window['go']['main']['App']['ImportSelectedZip'](arg1);
 }
 
-export function ImportZips() {
-  return window['go']['main']['App']['ImportZips']();
+export function ImportZips(arg1, arg2) {
+  return window['go']['main']['App']['ImportZips'](arg1, arg2);
+}
+
+export function ImportZipsFromPending(arg1) {
+  return window['go']['main']['App']['ImportZipsFromPending'](arg1);
 }
 
 export function InitAppState() {

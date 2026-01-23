@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
@@ -282,4 +283,264 @@ func RunUnzipQueue(task UnzipTask) {
 			task.OnFinished()
 		}
 	}()
+}
+
+func GetInstalledMods(dirPath string) ([]string, error) {
+	var mods []string
+
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			mods = append(mods, entry.Name())
+		}
+	}
+
+	return mods, nil
+}
+
+// CalculateDirSize 计算文件夹大小
+func CalculateDirSize(dirPath string) int64 {
+	var size int64
+	filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() {
+			size += info.Size()
+		}
+		return nil
+	})
+	return size
+}
+
+// FormatSize 格式化文件大小
+func FormatSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+// GetModifyTime 获取文件夹修改时间
+func GetModifyTime(dirPath string) time.Time {
+	info, err := os.Stat(dirPath)
+	if err != nil {
+		return time.Now()
+	}
+	return info.ModTime()
+}
+
+// GetModifyTimeString 获取文件夹修改时间（格式化字符串）
+func GetModifyTimeString(dirPath string) string {
+	info, err := os.Stat(dirPath)
+	if err != nil {
+		return time.Now().Format("2006-01-02")
+	}
+	return info.ModTime().Format("2006-01-02")
+}
+
+// GetStringOrDefault 获取字符串或默认值
+func GetStringOrDefault(value any, defaultValue string) string {
+	if str, ok := value.(string); ok && str != "" {
+		return str
+	}
+	return defaultValue
+}
+
+// GetLanguage 获取语言列表
+func GetLanguage(meta map[string]any) []string {
+	if lang, ok := meta["language"]; ok {
+		if langList, ok := lang.([]any); ok {
+			var result []string
+			for _, l := range langList {
+				if str, ok := l.(string); ok {
+					result = append(result, str)
+				}
+			}
+			if len(result) > 0 {
+				return result
+			}
+		}
+		if langStr, ok := lang.(string); ok && langStr != "" {
+			return []string{langStr}
+		}
+	}
+	return []string{"多语言"}
+}
+
+// ReadModMetadata 读取 mod 元数据文件（尝试多种文件名）
+func ReadModMetadata(modPath string) map[string]any {
+	metaFiles := []string{"mod.json", "info.json", "metadata.json", "modinfo.json"}
+	for _, filename := range metaFiles {
+		metaPath := filepath.Join(modPath, filename)
+		if PathExists(metaPath) {
+			meta, err := ReadJSON[map[string]any](metaPath)
+			if err == nil {
+				return meta
+			}
+		}
+	}
+	return make(map[string]any)
+}
+
+// GetModCoverURL 获取 mod 封面图片 URL
+func GetModCoverURL(modPath string, meta map[string]any) string {
+	if coverURL := GetStringOrDefault(meta["cover_url"], ""); coverURL != "" {
+		return coverURL
+	}
+
+	// 尝试在 mod 文件夹中查找图片文件
+	imageFiles := []string{
+		"cover.png", "cover.jpg", "cover.jpeg",
+		"card.png", "card.jpg", "card.jpeg",
+		"preview.png", "preview.jpg", "preview.jpeg",
+		"thumbnail.png", "thumbnail.jpg", "thumbnail.jpeg",
+		"image.png", "image.jpg", "image.jpeg",
+	}
+
+	for _, imgFile := range imageFiles {
+		imgPath := filepath.Join(modPath, imgFile)
+		if PathExists(imgPath) {
+			// 如果 mod 文件夹中有图片，返回空字符串
+			// 前端会检测到空字符串并使用默认图片
+			// 注意：如果需要显示 mod 文件夹中的图片，需要额外的后端 API 支持
+			return ""
+		}
+	}
+
+	return "assets/card_image.png"
+}
+
+// DetectModCapabilities 检测 mod 的功能
+func DetectModCapabilities(modPath string) map[string]bool {
+	caps := map[string]bool{
+		"tank":   false,
+		"air":    false,
+		"naval":  false,
+		"radio":  false,
+		"status": false,
+	}
+
+	err := filepath.Walk(modPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		name := strings.ToLower(info.Name())
+		relPath, _ := filepath.Rel(modPath, path)
+		relPathLower := strings.ToLower(relPath)
+
+		if strings.Contains(name, "tank") || strings.Contains(name, "ground") ||
+			strings.Contains(relPathLower, "tank") || strings.Contains(relPathLower, "ground") {
+			caps["tank"] = true
+		}
+
+		if strings.Contains(name, "air") || strings.Contains(name, "aircraft") ||
+			strings.Contains(relPathLower, "air") || strings.Contains(relPathLower, "aircraft") {
+			caps["air"] = true
+		}
+
+		if strings.Contains(name, "naval") || strings.Contains(name, "ship") ||
+			strings.Contains(relPathLower, "naval") || strings.Contains(relPathLower, "ship") {
+			caps["naval"] = true
+		}
+
+		if strings.Contains(name, "radio") || strings.Contains(relPathLower, "radio") {
+			caps["radio"] = true
+		}
+
+		if strings.Contains(name, "status") || strings.Contains(name, "situation") ||
+			strings.Contains(relPathLower, "status") || strings.Contains(relPathLower, "situation") {
+			caps["status"] = true
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		// 如果扫描失败，设置默认值
+		caps["tank"] = true
+	}
+
+	return caps
+}
+
+// GetModFolders 获取 mod 的子文件夹列表
+func GetModFolders(modPath string) []map[string]any {
+	var folders []map[string]any
+
+	entries, err := os.ReadDir(modPath)
+	if err != nil {
+		return folders
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		subDirPath := filepath.Join(modPath, entry.Name())
+		hasBankFile := false
+		subEntries, _ := os.ReadDir(subDirPath)
+		for _, subEntry := range subEntries {
+			if !subEntry.IsDir() && strings.HasSuffix(strings.ToLower(subEntry.Name()), ".bank") {
+				hasBankFile = true
+				break
+			}
+		}
+
+		if hasBankFile {
+			folderType := DetectFolderType(entry.Name(), subDirPath)
+			folders = append(folders, map[string]any{
+				"path": entry.Name(),
+				"type": folderType,
+			})
+		}
+	}
+
+	rootEntries, _ := os.ReadDir(modPath)
+	hasRootBank := false
+	for _, entry := range rootEntries {
+		if !entry.IsDir() && strings.HasSuffix(strings.ToLower(entry.Name()), ".bank") {
+			hasRootBank = true
+			break
+		}
+	}
+	if hasRootBank {
+		folders = append([]map[string]any{{
+			"path": "根目录",
+			"type": "folder",
+		}}, folders...)
+	}
+
+	return folders
+}
+
+// DetectFolderType 检测文件夹类型
+func DetectFolderType(folderName, folderPath string) string {
+	nameLower := strings.ToLower(folderName)
+	pathLower := strings.ToLower(folderPath)
+
+	if strings.Contains(nameLower, "ground") || strings.Contains(nameLower, "tank") ||
+		strings.Contains(pathLower, "ground") || strings.Contains(pathLower, "tank") {
+		return "ground"
+	}
+	if strings.Contains(nameLower, "air") || strings.Contains(nameLower, "aircraft") ||
+		strings.Contains(pathLower, "air") || strings.Contains(pathLower, "aircraft") {
+		return "aircraft"
+	}
+	if strings.Contains(nameLower, "radio") || strings.Contains(pathLower, "radio") {
+		return "radio"
+	}
+	return "folder"
 }

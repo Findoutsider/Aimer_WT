@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -187,12 +188,81 @@ func (a *App) ClearLogs() {
 
 // GetVoiceList 获取语音包库列表
 func (a *App) GetVoiceList() []map[string]any {
-	// TODO: 实现获取语音包列表
-	return []map[string]any{}
+	voicePath := a.resolvePath(VoiceFolder)
+	modDirs, err := GetInstalledMods(voicePath)
+	if err != nil {
+		Error("获取语音包列表失败: %v", err)
+		return []map[string]any{}
+	}
+
+	var result []map[string]any
+	for _, modDir := range modDirs {
+		modPath := filepath.Join(voicePath, modDir)
+		modInfo := a.buildModInfo(modDir, modPath)
+		if modInfo != nil {
+			result = append(result, modInfo)
+		}
+	}
+
+	return result
+}
+
+// buildModInfo 构建单个 mod 的信息
+func (a *App) buildModInfo(modId, modPath string) map[string]any {
+	// 尝试读取元数据文件
+	meta := ReadModMetadata(modPath)
+
+	// 计算文件夹大小
+	sizeStr := FormatSize(CalculateDirSize(modPath))
+
+	// 检测 capabilities
+	capabilities := DetectModCapabilities(modPath)
+
+	// 获取子文件夹列表（用于安装模态框）
+	folders := GetModFolders(modPath)
+
+	// 获取修改时间
+	dateStr := GetModifyTimeString(modPath)
+
+	// 获取封面图片 URL
+	coverURL := GetModCoverURL(modPath, meta)
+
+	// 构建 mod 信息
+	modInfo := map[string]any{
+		"id":            modId,
+		"title":         GetStringOrDefault(meta["title"], modId),
+		"author":        GetStringOrDefault(meta["author"], "未知作者"),
+		"version":       GetStringOrDefault(meta["version"], "1.0"),
+		"note":          GetStringOrDefault(meta["note"], ""),
+		"size_str":      sizeStr,
+		"capabilities":  capabilities,
+		"language":      GetLanguage(meta),
+		"cover_url":     coverURL,
+		"date":          dateStr,
+		"link_video":    GetStringOrDefault(meta["link_video"], ""),
+		"link_wtlive":   GetStringOrDefault(meta["link_wtlive"], ""),
+		"link_bilibili": GetStringOrDefault(meta["link_bilibili"], ""),
+		"folders":       folders,
+	}
+
+	return modInfo
+}
+
+// resolvePath 根据 FolderType 获取实际路径字符串
+func (a *App) resolvePath(fType FolderType) string {
+	if fType == GameFolder {
+		return gamePath
+	}
+
+	if path, ok := FolderPaths[fType]; ok {
+		return string(path)
+	}
+
+	return string(PendingFolderPath)
 }
 
 // ImportSelectedZip 导入选中的 ZIP
-func (a *App) ImportSelectedZip() {
+func (a *App) ImportSelectedZip(_type string) {
 	selectedZip, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "请选择压缩包",
 		Filters: []runtime.FileFilter{
@@ -214,9 +284,30 @@ func (a *App) ImportSelectedZip() {
 		Error("未选择压缩包")
 		return
 	}
+	a.ImportZips([]string{selectedZip}, _type)
+}
+
+func (a *App) ImportZipsFromPending(_type string) {
+
+}
+
+// ImportZips 批量导入 ZIP
+func (a *App) ImportZips(selectedZips []string, typeStr string) {
+	fType := FolderType(typeStr)
+	targetDir := a.resolvePath(fType)
+
+	for _, path := range selectedZips {
+		name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		if _, err := os.Stat(filepath.Join(targetDir, name)); err == nil {
+			Error("导入取消：检测到同名文件夹 %s 已存在", name)
+			runtime.EventsEmit(a.ctx, "error_tip", "导入取消", "目录下已有重复的文件夹")
+			return
+		}
+	}
+
 	RunUnzipQueue(UnzipTask{
-		Paths:     []string{selectedZip},
-		TargetDir: "data/voice",
+		Paths:     selectedZips,
+		TargetDir: targetDir,
 		OnProgress: func(current, total int, filename string) {
 			Scan("进度 (%d/%d): %s", current, total, filename)
 		},
@@ -228,12 +319,6 @@ func (a *App) ImportSelectedZip() {
 			runtime.EventsEmit(a.ctx, "ev_import_finished", true)
 		},
 	})
-}
-
-// ImportZips 批量导入 ZIP
-func (a *App) ImportZips() {
-	// TODO: 实现批量导入 ZIP 逻辑
-	Info("扫描待解压目录")
 }
 
 // OpenFolder 打开文件夹

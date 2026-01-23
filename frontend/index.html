@@ -405,17 +405,48 @@
 
     <div id="tooltip" class="tooltip"></div>
 
-<!--    <script type="module">-->
-<!--        import {EventsOn} from "./wailsjs/runtime";-->
+    <!-- 错误提示框 (Toast 风格) -->
+    <div id="toast-error" class="toast-error">
+        <div class="toast-error-content">
+            <i class="ri-error-warning-line toast-error-icon"></i>
+            <div class="toast-error-text">
+                <div class="toast-error-title">错误</div>
+                <div class="toast-error-message"></div>
+            </div>
+            <button class="toast-error-close" id="toast-error-close">
+                <i class="ri-close-line"></i>
+            </button>
+        </div>
+    </div>
 
-<!--        window.addEventListener('load', () => {-->
+    <!-- 警告提示框 (Toast 风格) -->
+    <div id="toast-warn" class="toast-warn">
+        <div class="toast-warn-content">
+            <i class="ri-alert-line toast-warn-icon"></i>
+            <div class="toast-warn-text">
+                <div class="toast-warn-title">警告</div>
+                <div class="toast-warn-message"></div>
+            </div>
+            <button class="toast-warn-close" id="toast-warn-close">
+                <i class="ri-close-line"></i>
+            </button>
+        </div>
+    </div>
 
-<!--        });-->
-<!--        import * as WailsApp from './wailsjs/go/main/App.js';-->
+    <!-- 提示提示框 (Toast 风格) -->
+    <div id="toast-info" class="toast-info">
+        <div class="toast-info-content">
+            <i class="ri-information-line toast-info-icon"></i>
+            <div class="toast-info-text">
+                <div class="toast-info-title">提示</div>
+                <div class="toast-info-message"></div>
+            </div>
+            <button class="toast-info-close" id="toast-info-close">
+                <i class="ri-close-line"></i>
+            </button>
+        </div>
+    </div>
 
-<!--        // 直接合并到 window 对象-->
-<!--        Object.assign(window, WailsApp);-->
-<!--    </script>-->
     <script src="loading_voice_package.js"></script>
     <script type="module" src="script.js"></script>
     <script type="module">

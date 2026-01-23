@@ -20,9 +20,11 @@ export function GetThemeList():Promise<Array<main.ThemeMeta>>;
 
 export function GetVoiceList():Promise<Array<Record<string, any>>>;
 
-export function ImportSelectedZip():Promise<void>;
+export function ImportSelectedZip(arg1:string):Promise<void>;
 
-export function ImportZips():Promise<void>;
+export function ImportZips(arg1:Array<string>,arg2:string):Promise<void>;
+
+export function ImportZipsFromPending(arg1:string):Promise<void>;
 
 export function InitAppState():Promise<Record<string, any>>;
 

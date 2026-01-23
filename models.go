@@ -30,6 +30,18 @@ type ActiveTheme struct {
 	ActiveTheme string `json:"active_theme"`
 }
 
+type Mod struct {
+	Title        string          `json:"title"`
+	Author       string          `json:"author"`
+	Note         string          `json:"note"`
+	LinkBiliBili string          `json:"link_bilibili"`
+	LinkWtLive   string          `json:"link_wtlive"`
+	LinkVideo    string          `json:"link_video"`
+	Language     []string        `json:"language"`
+	SizeStr      string          `json:"size_str"`
+	Capabilities map[string]bool `json:"capabilities"`
+}
+
 type FolderType string
 
 const (
