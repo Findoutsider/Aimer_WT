@@ -357,7 +357,7 @@ func (a *App) RestoreGame() {
 // CheckFirstRun 检查首次运行
 func (a *App) CheckFirstRun() map[string]any {
 	agreementVersion := vp.GetString("agreement_version")
-	currentVersion := "1.0" // TODO: 从配置或常量获取当前版本
+	currentVersion := "1.1" // TODO: 从配置或常量获取当前版本
 	if agreementVersion != currentVersion {
 		return map[string]any{"status": true, "version": currentVersion}
 	}
@@ -368,5 +368,5 @@ func (a *App) CheckFirstRun() map[string]any {
 func (a *App) AgreeToTerms(version string) {
 	vp.Set("agreement_version", version)
 	vp.WriteConfig()
-	logger.Printf("已同意条款，版本: %s", version)
+	Info("已同意条款，版本: %s", version)
 }

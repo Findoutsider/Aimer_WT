@@ -212,6 +212,12 @@ const app = {
     },
 
     closeModal(modalId) {
+        // 协议窗口不能通过此函数关闭，必须由用户手动处理
+        if (modalId === 'modal-disclaimer') {
+            console.warn('协议窗口不能通过 closeModal 关闭');
+            return;
+        }
+        
         const el = document.getElementById(modalId);
         if (!el) return;
         if (!el.classList.contains('show')) return;
@@ -310,6 +316,8 @@ const app = {
 
     forceHideAllModals() {
         document.querySelectorAll('.modal-overlay').forEach(el => {
+            // 不要关闭协议窗口，它必须由用户手动处理
+            if (el.id === 'modal-disclaimer') return;
             el.classList.remove('show');
             el.classList.remove('hiding');
         });
@@ -498,8 +506,21 @@ const app = {
 
     recoverToSafeState(reason) {
         try {
+            // 如果协议窗口正在显示，不要关闭它
+            const disclaimerModal = document.getElementById('modal-disclaimer');
+            const isDisclaimerShowing = disclaimerModal && disclaimerModal.classList.contains('show');
+            
             this.forceHideAllModals();
-            this.switchTab('home');
+            
+            // 如果协议窗口之前正在显示，恢复它
+            if (isDisclaimerShowing) {
+                disclaimerModal.classList.add('show');
+            }
+            
+            // 如果协议窗口正在显示，不要切换标签页
+            if (!isDisclaimerShowing) {
+                this.switchTab('home');
+            }
         } catch (e) {
         }
     },
@@ -1140,8 +1161,22 @@ app.checkDisclaimer = async function () {
             // 保存版本号到临时变量，等用户同意后再写回
             app._pendingAgreementVer = result.version;
 
+            // 确保隐藏所有其他模态框和提示框（但不包括协议窗口本身）
+            app.forceHideAllModals();
+            app.hideErrorToast();
+            app.hideWarnToast();
+            app.hideInfoToast();
+
             const modal = document.getElementById('modal-disclaimer');
-            modal.classList.add('show');
+            if (modal) {
+                // 确保协议窗口在最上层
+                modal.style.zIndex = '99999';
+                // 直接显示，不需要延迟
+                modal.classList.add('show');
+                
+                // 标记协议窗口正在显示，防止被其他逻辑关闭
+                app._disclaimerShowing = true;
+            }
 
             // 倒计时逻辑
             const btn = document.getElementById('btn-disclaimer-agree');
@@ -1172,13 +1207,21 @@ app.disclaimerAgree = async function () {
 
     // 关闭弹窗
     const modal = document.getElementById('modal-disclaimer');
-    modal.classList.remove('show');
+    if (modal) {
+        modal.classList.remove('show');
+    }
+    
+    // 清除标记
+    app._disclaimerShowing = false;
 
     // 调用 API 保存状态
     await App.AgreeToTerms(app._pendingAgreementVer);
 };
 
 app.disclaimerReject = function () {
+    // 清除标记
+    app._disclaimerShowing = false;
+    
     // 拒绝则退出程序
     App.CloseApp();
 };
@@ -1239,11 +1282,12 @@ app.handleShortcuts = function (e) {
     }
 };
 
-// 启动 (稍作修改: init 里面调用 checkDisclaimer)
+    // 启动 (稍作修改: init 里面调用 checkDisclaimer)
 app.init = async function () {
     document.addEventListener('DOMContentLoaded', bindEventListeners);
 
-    this.recoverToSafeState('init');
+    // 注意：不要在初始化时调用 recoverToSafeState，因为它会关闭协议窗口
+    // this.recoverToSafeState('init');
 
     if (!this._safetyHandlersInstalled) {
         this._safetyHandlersInstalled = true;
@@ -1264,7 +1308,7 @@ app.init = async function () {
     window.addEventListener('DOMContentLoaded', async () => {
         console.log("PyWebview ready!");
 
-        // 1. 优先检查免责声明
+        // 1. 优先检查免责声明（在 recoverToSafeState 之后调用，避免被关闭）
         await app.checkDisclaimer();
 
         // 2. 获取初始状态

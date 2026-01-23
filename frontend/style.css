@@ -1,7 +1,7 @@
 :root {
     /* --- 所有的颜色定义都移交给了 theme_presets.js 或 JS 动态控制 --- */
     /* 为了防止 JS 加载延迟闪烁，建议把 DEFAULT_THEME 里的内容复制一份在这里作为兜底 --- */
-
+    --wails-draggable: drag;
     /* 全局 */
     --primary: #FF9900;
     --primary-hover: #e68a00;
@@ -360,8 +360,13 @@ i[class^="ri-"] {
     gap: 12px;
     padding-right: 24px;
     /* 允许拖拽 */
-    -webkit-app-region: drag; 
+    -webkit-app-region: drag !important; 
     height: 100%; /* 填满高度以方便拖拽 */
+}
+
+/* 确保 header-left 内的所有子元素也支持拖动 */
+.header-left * {
+    -webkit-app-region: drag !important;
 }
 
 .app-logo {
@@ -1737,7 +1742,7 @@ i[class^="ri-"] {
     transform: translateY(0);
 
     /* 2025 年最潮的渐变蒙版 */
-    -webkit-mask-image: linear-gradient(
+    -webkit-mask-image:     linear-gradient(
         to bottom,
         transparent 0%,
         black 25px,
@@ -2116,6 +2121,12 @@ i[class^="ri-"] {
     background: rgba(0,0,0,0.5); backdrop-filter: blur(4px);
     display: none; align-items: center; justify-content: center; z-index: 10000;
 }
+
+/* 协议窗口必须始终在最上层，优先级最高 */
+#modal-disclaimer {
+    --wails-draggable: no-drag;
+    z-index: 99999 !important;
+}
 .modal-overlay.show { display: flex; animation: fadeIn 0.2s; }
 .modal-overlay.hiding { animation: fadeOut 0.2s forwards; }
 
@@ -2186,6 +2197,12 @@ i[class^="ri-"] {
 body.drag-disabled, 
 body.drag-disabled * {
     -webkit-app-region: no-drag !important;
+}
+
+/* 确保 header-left 区域始终可拖动，即使 body 有 drag-disabled 类 */
+body.drag-disabled .header-left,
+body.drag-disabled .header-left * {
+    -webkit-app-region: drag !important;
 }
 
 /* --- Theme Select --- */
