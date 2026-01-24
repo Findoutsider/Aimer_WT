@@ -22,7 +22,6 @@ var gamePath string
 func main() {
 	InitLogger(basePath)
 	go startLogRotationTrigger(rotator)
-	go InitAppFolders()
 
 	exePath, _ := os.Executable()
 	basePath = filepath.Dir(exePath)

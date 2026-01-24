@@ -128,7 +128,10 @@ func verifyGamePath(path string) (bool, string) {
 
 	gamePath = path
 	vp.Set("game_path", gamePath)
-	vp.WriteConfig()
+	err := vp.WriteConfig()
+	if err != nil {
+		Error("保存路径失败: %v", err)
+	}
 
 	return true, "校验通过"
 }
@@ -181,7 +184,7 @@ func InitAppFolders() {
 		Info(string(path))
 		err := os.MkdirAll(string(path), 0755)
 		if err != nil {
-			Error("创建文件夹失败 [%s]: %v", path, err)
+			Error("创建资源文件夹失败 [%s]: %v", path, err)
 		}
 	}
 }
@@ -201,7 +204,11 @@ func Unzip(src string, dest string) error {
 	subdirName := strings.TrimSuffix(fileNameWithExt, filepath.Ext(fileNameWithExt))
 	realDest := filepath.Join(dest, subdirName)
 
-	os.MkdirAll(realDest, 0755)
+	err = os.MkdirAll(realDest, 0755)
+	if err != nil {
+		Error("创建文件夹失败 [%s]: %v", realDest, err)
+		return err
+	}
 
 	for _, f := range r.File {
 		fpath := filepath.Join(realDest, f.Name)
@@ -211,7 +218,11 @@ func Unzip(src string, dest string) error {
 		}
 
 		if f.FileInfo().IsDir() {
-			os.MkdirAll(fpath, os.ModePerm)
+			err = os.MkdirAll(fpath, os.ModePerm)
+			if err != nil {
+				Error("创建文件夹失败 [%s]: %v", fpath, err)
+				return err
+			}
 			continue
 		}
 

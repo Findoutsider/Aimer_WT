@@ -300,6 +300,7 @@ func (a *App) ImportZipsFromPending() {
 
 // ImportZips 批量导入 ZIP
 func (a *App) ImportZips(selectedZips []string, typeStr string) {
+	go InitAppFolders()
 	fType := FolderType(typeStr)
 	targetDir := a.resolvePath(fType)
 

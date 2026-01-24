@@ -141,6 +141,7 @@
     }
 
     #input-game-path {
+        --wails-draggable: no-drag;
         background: rgba(255, 255, 255, 0.05);
         border-color: rgba(255, 255, 255, 0.1);
         color: var(--text-main);
@@ -993,6 +994,7 @@ i[class^="ri-"] {
 }
 
 .input-row {
+    --wails-draggable: no-drag;
     display: flex;
     padding: 28px 32px;
     gap: 16px;
@@ -2207,6 +2209,7 @@ body.drag-disabled .header-left * {
 
 /* --- Theme Select --- */
 .theme-select {
+    --wails-draggable: no-drag;
     width: 100%;
     height: 42px;
     padding: 0 12px;
