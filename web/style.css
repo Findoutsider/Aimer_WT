@@ -3206,10 +3206,6 @@ i[class^="ri-"] {
     }
 }
 
-/* 当鼠标悬停在特定卡片上时，禁用全局拖拽 */
-body.drag-disabled,
-body.drag-disabled * {}
-
 /* --- Theme Select --- */
 .theme-select {
     width: 100%;
