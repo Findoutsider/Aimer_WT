@@ -175,7 +175,7 @@ class CoreService:
         import winreg
         """
         功能定位:
-        - 在本机上自动定位 War Thunder 安装目录。
+        - 在Windows主机上自动定位 War Thunder 安装目录。
 
         输入输出:
         - 参数: 无
@@ -227,6 +227,28 @@ class CoreService:
         return None
 
     def get_linux_game_paths(self):
+        """
+        功能定位:
+        - 在Linux主机上自动定位 War Thunder 安装目录。
+
+        输入输出:
+        - 参数: 无
+        - 返回:
+          - str | None，找到则返回游戏根目录路径字符串，否则返回 None。
+        - 外部资源/依赖:
+          - 标准 Steam 库路径（如 ～/.local/share/Steam/steamapps/common/War Thunder）
+          - Flatpak 或其他常见安装位置（若适用）
+
+        实现逻辑:
+        - 1) 尝试从 steam_roots 获取 libraryfolders.vdf
+        - 2) 从 libraryfolders.vdf 中读取战雷游戏路径
+        - 3) 找到即返回，否则返回 None。
+
+        业务关联:
+        - 上游: 前端“自动搜索”触发。
+        - 下游: 搜索结果用于调用 validate_game_path 并写入配置。
+        """
+
         self.log("开始检索 Linux Steam 库...", "SEARCH")
         paths = set()
         
@@ -260,6 +282,27 @@ class CoreService:
         return None
 
     def auto_detect_game_path(self):
+        """
+        功能定位:
+        - 在本机上自动定位 War Thunder 安装目录(跨平台支持)。
+
+        输入输出:
+        - 参数: 无
+        - 返回:
+          - str | None，找到则返回游戏根目录路径字符串，否则返回 None。
+       
+        实现逻辑:
+        - 1) 根据当前操作系统（Windows / Linux）分发至对应检测方法。
+        - 2) 各平台分别尝试：
+            - 从 Steam 安装路径推导 War Thunder 目录并校验；
+            - 遍历预设的常见安装路径进行存在性检查。
+        - 3) 任一平台方法一旦找到有效路径即返回；若均未找到，返回 None。
+
+        业务关联:
+        - 上游: 前端“自动搜索”触发。
+        - 下游: 搜索结果用于调用 validate_game_path 并写入配置。
+        """
+
         import sys
         if sys.platform == "win32":
             return self.get_windows_game_paths()
