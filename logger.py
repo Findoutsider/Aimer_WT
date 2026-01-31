@@ -28,7 +28,6 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 import sys
-import os
 
 def setup_logger(name="WT_Voice_Manager"):
     """
