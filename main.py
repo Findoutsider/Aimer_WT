@@ -52,7 +52,7 @@ from skins_manager import SkinsManager
 from telemetry_manager import init_telemetry, get_hwid
 
 APP_VERSION = "2.1.0"
-AGREEMENT_VERSION = "2026-01-10"
+AGREEMENT_VERSION = "2026-02-02"
 
 # 资源目录定位：打包环境使用 _MEIPASS，开发环境使用源码目录
 if getattr(sys, "frozen", False):
@@ -1427,9 +1427,6 @@ class AppApi:
                 self._is_busy = False
             return False
 
-        # 记录当前语音包标识，供前端在列表中标记已生效项
-        self._cfg_mgr.set_current_mod(mod_name)
-
         def _run():
             try:
                 mod_path = self._lib_mgr.library_dir / mod_name
@@ -1669,8 +1666,6 @@ class AppApi:
             try:
                 self._logic.restore_game()
 
-                # 还原成功，清除状态
-                self._cfg_mgr.set_current_mod("")
                 if self._window:
                     self._window.evaluate_js("app.onRestoreSuccess()")
             finally:
