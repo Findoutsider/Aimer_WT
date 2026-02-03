@@ -154,10 +154,11 @@ class AppApi:
         self._logic.set_callbacks(self.log_from_backend)
 
         # 初始化遥测系统
-        tm = init_telemetry(APP_VERSION)
-        tm.set_server_message_callback(self.on_server_message)
-        tm.set_user_command_callback(self.on_user_command)
-        tm.set_log_callback(self.log_from_backend)
+        if self._cfg_mgr.get_telemetry_enabled():
+            tm = init_telemetry(APP_VERSION)
+            tm.set_server_message_callback(self.on_server_message)
+            tm.set_user_command_callback(self.on_user_command)
+            tm.set_log_callback(self.log_from_backend)
 
         self._search_running = False
         self._is_busy = False
@@ -528,7 +529,8 @@ class AppApi:
             "active_theme": self._cfg_mgr.get_active_theme(),
             "installed_mods": self._logic.get_installed_mods(),
             "sights_path": sights_path,
-            "hwid": get_hwid()
+            "hwid": get_hwid(),
+            "telemetry_enabled": self._cfg_mgr.get_telemetry_enabled()
         }
 
     def save_theme_selection(self, filename):
@@ -570,6 +572,36 @@ class AppApi:
         - 下游: 下次启动时恢复主题模式。
         """
         self._cfg_mgr.set_theme_mode(mode)
+
+    def get_telemetry_status(self):
+        """
+        功能定位:
+        - 获取当前遥测开启状态。
+        """
+        return self._cfg_mgr.get_telemetry_enabled()
+
+    def set_telemetry_status(self, enabled):
+        """
+        功能定位:
+        - 设置遥测开启状态，并实时启动/停止后台服务。
+        """
+        self._cfg_mgr.set_telemetry_enabled(enabled)
+
+        tm = init_telemetry(APP_VERSION)
+        
+        if enabled:
+            tm.set_server_message_callback(self.on_server_message)
+            tm.set_user_command_callback(self.on_user_command)
+            tm.set_log_callback(self.log_from_backend)
+
+            tm.stop()
+            tm.start_heartbeat_loop()
+            tm.report_startup()
+            self.log_from_backend("[SYS] 遥测服务已启用", "SUCCESS")
+        else:
+            tm.stop()
+            self.log_from_backend("[SYS] 遥测服务已停用", "WARN")
+
 
     def browse_folder(self):
         """
@@ -1504,17 +1536,10 @@ class AppApi:
             if not mod_path.exists():
                 return []
 
-            # 遍历将要安装的目录集合，收集目标文件名列表
             files_to_install = []
-            for folder_rel_path in install_list:
-                if folder_rel_path == "根目录":
-                    src_dir = mod_path
-                else:
-                    src_dir = mod_path / folder_rel_path
-                if src_dir.exists():
-                    for root, dirs, files in os.walk(src_dir):
-                        for file in files:
-                            files_to_install.append(file)
+            for file_rel_path in install_list:
+                file_name = Path(file_rel_path).name
+                files_to_install.append(file_name)
 
             # 调用 manifest_mgr 进行冲突检测
             if self._logic.manifest_mgr:

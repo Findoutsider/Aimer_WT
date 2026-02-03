@@ -247,6 +247,11 @@ class TelemetryManager:
         thread = threading.Thread(target=_loop, name="TelemetryHeartbeat", daemon=True)
         thread.start()
 
+    def stop(self):
+        """停止心跳上报"""
+        if self._stop_heartbeat:
+            self._stop_heartbeat.set()
+
 
 _instance = None
 

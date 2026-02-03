@@ -442,3 +442,26 @@ class ConfigManager:
         """
         self.config["agreement_version"] = version
         self.save_config()
+
+    def get_telemetry_enabled(self):
+        """
+        功能定位:
+        - 读取遥测功能开启状态。
+
+        输入输出:
+        - 参数: 无
+        - 返回: bool，默认 True。
+        """
+        return bool(self.config.get("telemetry_enabled", True))
+
+    def set_telemetry_enabled(self, enabled):
+        """
+        功能定位:
+        - 更新遥测功能开启状态。
+
+        输入输出:
+        - 参数:
+          - enabled: bool，是否开启。
+        """
+        self.config["telemetry_enabled"] = bool(enabled)
+        self.save_config()

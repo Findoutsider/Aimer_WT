@@ -421,16 +421,16 @@ class CoreService:
         except json.decoder.JSONDecodeError:
             self.log(f"读取已安装mods失败，文件解析错误：{self.manifest_mgr.manifest_file}", "ERROR")
 
-    # --- 核心：安装逻辑 (V2.2 - 文件夹直拷) ---
+    # --- 核心：安装逻辑 (V2.3 - 按文件类型安装) ---
     def install_from_library(self, source_mod_path, install_list=None, progress_callback=None):
         """
         功能定位:
-        - 将语音包库中的文件复制到游戏目录 <game_root>/sound/mod，并更新 config.blk 以启用 mod。
+        - 将语音包库中的指定文件复制到游戏目录 <game_root>/sound/mod，并更新 config.blk 以启用 mod。
 
         输入输出:
         - 参数:
           - source_mod_path: Path，语音包源目录（语音包库中某个 mod 文件夹）。
-          - install_list: list[str] | None，待安装的相对文件夹列表；特殊值 "根目录" 表示直接使用 source_mod_path。
+          - install_list: list[str] | None，待安装的文件相对路径列表。
           - progress_callback: Callable[[int, str], None] | None，用于向调用方推送进度百分比与提示信息。
         - 返回: None
         - 外部资源/依赖:
@@ -440,7 +440,7 @@ class CoreService:
         实现逻辑:
         - 1) 校验 game_root 已设置。
         - 2) 确保 <game_root>/sound/mod 目录存在。
-        - 3) 遍历 install_list，将待复制文件整理为 files_info（源文件、目标文件、来源文件夹标识）。
+        - 3) 遍历 install_list 中的文件路径，逐个复制到 sound/mod。
         - 4) 逐文件执行 copy2，并按节流策略更新 progress_callback。
         - 5) 将本次复制到的目标文件名列表写入安装清单。
         - 6) 调用 _update_config_blk 写入 enable_mod:b=yes。
@@ -473,36 +473,17 @@ class CoreService:
                 progress_callback(10, "扫描待安装文件...")
 
             # 2. 复制文件
-            self.log("正在复制选中文件夹的内容...", "COPY")
+            self.log("正在复制选中的语音文件...", "COPY")
 
             if not install_list or len(install_list) == 0:
-                self.log("未选择任何文件夹，跳过安装。", "WARN")
+                self.log("未选择任何文件，跳过安装。", "WARN")
                 if progress_callback:
                     progress_callback(100, "未选择文件")
                 return
 
-            # 首先统计总文件数，用于计算真实进度
-            total_files_to_copy = 0
-            files_info = []  # [(src_file, dest_file, folder_rel_path), ...]
-
-            for folder_rel_path in install_list:
-                src_dir = None
-                if folder_rel_path == "根目录":
-                    src_dir = source_mod_path
-                else:
-                    src_dir = source_mod_path / folder_rel_path
-
-                if not src_dir.exists():
-                    self.log(f"[WARN] 找不到源文件夹: {folder_rel_path}", "WARN")
-                    continue
-
-                for root, dirs, files in os.walk(src_dir):
-                    for file in files:
-                        src_file = Path(root) / file
-                        dest_file = game_mod_dir / file
-                        files_info.append((src_file, dest_file, folder_rel_path))
-                        total_files_to_copy += 1
-
+            # 统计总文件数
+            total_files_to_copy = len(install_list)
+            
             if total_files_to_copy == 0:
                 self.log("未找到任何可安装的文件。", "WARN")
                 if progress_callback:
@@ -515,27 +496,31 @@ class CoreService:
             total_files = 0
             # 收集本次安装的目标文件名，用于写入安装清单
             installed_files_record = []
-            folder_files_count = {}  # 用于统计每个文件夹的文件数
-
+            
             # 进度计算：10% 预检，15-95% 复制文件，95-100% 更新配置
             copy_progress_start = 15
             copy_progress_end = 95
             last_progress_update = time.monotonic()
 
-            for idx, (src_file, dest_file, folder_rel_path) in enumerate(files_info):
+            for idx, file_rel_path in enumerate(install_list):
                 try:
+                    # 构建源文件和目标文件路径
+                    src_file = source_mod_path / file_rel_path
+                    
+                    # 目标文件只使用文件名，不保留目录结构
+                    dest_file = game_mod_dir / Path(file_rel_path).name
+                    
+                    if not src_file.exists():
+                        self.log(f"[WARN] 源文件不存在: {file_rel_path}", "WARN")
+                        continue
+                    
                     shutil.copy2(src_file, dest_file)
                     total_files += 1
                     installed_files_record.append(dest_file.name)
 
-                    # 统计每个文件夹的文件数
-                    if folder_rel_path not in folder_files_count:
-                        folder_files_count[folder_rel_path] = 0
-                    folder_files_count[folder_rel_path] += 1
-
                     # 更新进度 (限制更新频率，避免 UI 卡顿)
                     now = time.monotonic()
-                    if progress_callback and (now - last_progress_update >= 0.1 or idx == len(files_info) - 1):
+                    if progress_callback and (now - last_progress_update >= 0.1 or idx == len(install_list) - 1):
                         progress = copy_progress_start + (idx + 1) / total_files_to_copy * (
                                 copy_progress_end - copy_progress_start)
                         # 文件名截断显示
@@ -546,11 +531,9 @@ class CoreService:
                         last_progress_update = now
 
                 except Exception as e:
-                    self.log(f"  复制文件 {src_file.name} 失败: {e}", "WARN")
+                    self.log(f"  复制文件 {file_rel_path} 失败: {e}", "WARN")
 
-            # 输出每个文件夹的统计
-            for folder_path, count in folder_files_count.items():
-                self.log(f"[OK] 已合并导入 [{folder_path}] ({count} 个文件)", "INFO")
+            self.log(f"[OK] 已成功安装 {total_files} 个文件", "INFO")
 
             # 写入安装清单记录（mod -> 文件名列表）
             if self.manifest_mgr and total_files > 0:
