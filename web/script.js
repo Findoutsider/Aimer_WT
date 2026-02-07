@@ -1334,7 +1334,7 @@ const app = {
     },
 
     // --- 路径搜索逻辑 ---
-    updatePathUI(path, valid) {
+    async updatePathUI(path, valid) {
         const input = document.getElementById('input-game-path');
         const statusIcon = document.getElementById('status-icon');
         const statusText = document.getElementById('status-text');
@@ -1347,16 +1347,31 @@ const app = {
             statusIcon.className = 'status-icon active';
             statusText.textContent = '连接正常';
             statusText.className = 'status-text success';
+
+            try {
+                if (window.pywebview && pywebview.api && pywebview.api.get_installed_mods) {
+                    this.installedModIds = await pywebview.api.get_installed_mods() || [];
+                }
+            } catch (e) {
+                console.error("Failed to update installed mods:", e);
+                this.installedModIds = [];
+            }
         } else if (!path) {
             statusIcon.innerHTML = '<i class="ri-wifi-off-line"></i>';
             statusIcon.className = 'status-icon';
             statusText.textContent = '未设置路径';
             statusText.className = 'status-text waiting';
+            this.installedModIds = [];
         } else {
             statusIcon.innerHTML = '<i class="ri-error-warning-line"></i>';
             statusIcon.className = 'status-icon';
             statusText.textContent = '路径无效';
             statusText.className = 'status-text error';
+            this.installedModIds = [];
+        }
+
+        if (this.modCache && this.modCache.length > 0) {
+            this.renderList(this.modCache);
         }
     },
 
@@ -1374,6 +1389,23 @@ const app = {
         } catch (e) {
             console.error('browsePath failed:', e);
             this.showAlert('错误', '选择路径失败: ' + e.message, 'error');
+        }
+    },
+
+    async toggleTelemetry(checked) {
+        const toggle = document.getElementById('telemetry-switch');
+        // 先还原 UI 状态，等待确认
+        toggle.checked = !checked;
+        const action = checked ? "开启" : "关闭";
+        const message = checked
+            ? "开启遥测功能将允许软件发送匿名的使用统计与环境数据，帮助开发者改进软件体验。<br><br>确认要开启吗？"
+            : "关闭遥测功能后，开发者将无法收到您的使用反馈与统计，这可能会影响版本迭代方向。<br><br>确认要关闭吗？";
+        // 关闭时显示红色确认按钮，开启时显示普通按钮
+        const isDanger = !checked;
+        const yes = await app.confirm(`确认${action}遥测`, message, isDanger);
+        if (yes) {
+            toggle.checked = checked; // 用户确认，应用新状态
+            await pywebview.api.set_telemetry_status(checked);
         }
     },
 
@@ -2307,6 +2339,11 @@ app.init = async function () {
                 document.body.classList.remove('drag-disabled');
             });
         });
+
+        const telSwitch = document.getElementById('telemetry-switch');
+        if (telSwitch) {
+            telSwitch.checked = !!state.telemetry_enabled;
+        }
     };
 
     // 防止重複註册 pywebviewready 监听器

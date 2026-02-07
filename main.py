@@ -10,6 +10,7 @@ import threading
 import time
 import platform
 import subprocess
+
 try:
     import webview
 except Exception as _e:
@@ -155,6 +156,7 @@ def _parse_cli_args(argv: list[str] | None = None) -> argparse.Namespace:
     except Exception:
         return argparse.Namespace(allow_fallback=False, perf=False)
 
+
 class AppApi:
     # 提供前端可调用的后端 API 集合，并协调配置、库管理、安装与资源管理等模块。
 
@@ -167,10 +169,10 @@ class AppApi:
         self._perf_enabled = bool(perf_enabled)
 
         # 保存 PyWebview Window 引用（用于调用 evaluate_js 与打开系统对话框）
-        
+
         # 连接 logger -> 前端 UI（窗口未创建时会自动忽略）
         set_ui_callback(self._append_log_to_ui)
-        
+
         # [关键修复] 将 window 改为 _window。
         # 加下划线表示私有变量，pywebview 就不会尝试去扫描和序列化整个窗口对象，
         # 从而避免了 "window.native... maximum recursion depth" 错误。
@@ -179,7 +181,7 @@ class AppApi:
         # 管理器实例：配置、语音包库、涂装、炮镜、游戏目录操作
         # 注意：所有管理器现在统一使用 logger.py 的日誌系统
         self._cfg_mgr = ConfigManager()
-        
+
         # 从配置读取自定义路径
         custom_pending = self._cfg_mgr.get_pending_dir()
         custom_library = self._cfg_mgr.get_library_dir()
@@ -187,16 +189,17 @@ class AppApi:
             pending_dir=custom_pending if custom_pending else None,
             library_dir=custom_library if custom_library else None
         )
-        
+
         self._skins_mgr = SkinsManager()
         self._sights_mgr = SightsManager()
         self._logic = CoreService()
 
         # 初始化遥测系统
-        tm = init_telemetry(APP_VERSION)
-        tm.set_server_message_callback(self.on_server_message)
-        tm.set_user_command_callback(self.on_user_command)
-        tm.set_log_callback(self.log_from_backend)
+        if self._cfg_mgr.get_telemetry_enabled():
+            tm = init_telemetry(APP_VERSION)
+            tm.set_server_message_callback(self.on_server_message)
+            tm.set_user_command_callback(self.on_user_command)
+            tm.set_log_callback(self._logger)
 
         self._search_running = False
         self._is_busy = False
@@ -229,7 +232,7 @@ class AppApi:
             maint_key = f"{is_maint}:{maint_msg}"
 
             if is_maint and (self._last_maintenance_status != maint_key):
-                self.log_from_backend(f"[SYS] ⚠️ 维护模式已开启: {maint_msg}", "WARN")
+                self._logger.warning(f"[SYS] ⚠️ 维护模式已开启: {maint_msg}")
                 self._window.evaluate_js(safe_js_call("showWarnToast", "维护模式已开启", maint_msg, 8000))
 
             self._last_maintenance_status = maint_key
@@ -241,7 +244,7 @@ class AppApi:
                 full_alert_key = f"{title}|{content}"
 
                 if content and (self._last_alert_content != full_alert_key):
-                    self.log_from_backend(f"[通知] {title}", "SUCCESS")
+                    self._logger.info(f"[通知] {title}")
                     self._window.evaluate_js(safe_js_call("showAlert", title, content, "info"))
                     self._last_alert_content = full_alert_key
 
@@ -259,7 +262,7 @@ class AppApi:
 
                 update_key = f"{content}|{update_url}"
                 if content and (self._last_update_content != update_key):
-                    self.log_from_backend(f"[更新] {content}", "INFO")
+                    self._logger.info(f"[更新] {content}")
                     self._window.evaluate_js(safe_js_call("showAlert", "发现新版本", content, "success", update_url))
                     self._last_update_content = update_key
 
@@ -283,10 +286,10 @@ class AppApi:
                 return f"if(window.app && app.{func_name}) app.{func_name}({js_args})"
 
             if cmd_type == "popup":
-                self.log_from_backend("[CMD] 收到远程强制弹窗", "INFO")
+                self._logger.info("[CMD] 收到系统通知")
                 self._window.evaluate_js(safe_js_call("showAlert", "系统通知", msg, "info"))
             elif cmd_type == "toast":
-                self.log_from_backend(f"[CMD] 收到远程提示: {msg}", "INFO")
+                self._logger.info(f"[CMD] 收到管理员信息: {msg}")
                 self._window.evaluate_js(safe_js_call("showWarnToast", "管理员消息", msg, 5000))
 
         except Exception as e:
@@ -314,7 +317,7 @@ class AppApi:
         """
         if not self._window:
             return
-        
+
         # 1. 追加日志到面板
         try:
             safe_msg = formatted_message.replace("\r", "").replace("\n", "<br>")
@@ -328,7 +331,7 @@ class AppApi:
         # 我们可以根据 record.message 或 record.levelname 判断是否弹窗。
         # 以前的逻辑是：如果 levelKey in (WARN, ERROR, SUCCESS) 则弹窗。
         # 这里我们需要从 message 探测 [SUCCESS] 这种自定义标签，因为 standard logging 只有 INFO/WARN/ERROR。
-        
+
         try:
             level_key = record.levelname  # INFO, WARNING, ERROR, DEBUG
             msg_content = record.getMessage()
@@ -336,12 +339,12 @@ class AppApi:
             # 兼容：从消息内容解析 [SUCCESS] / [WARN] / [ERROR] 等标签
             # 如果消息里显式写了 [SUCCESS]，我们认为它是 SUCCESS 级别
             import re
-            match = re.search(r"^\s*\[(SUCCESS|WARN|ERROR|INFO|SYS)\]", msg_content)
+            match = re.search(r"^\s*\[(SUCCESS|WARN|ERROR|INFO|SYS)]", msg_content)
             custom_tag = match.group(1) if match else None
 
             # 映射到前端 Toast 类型
             toast_level = None
-            
+
             if custom_tag == "SUCCESS":
                 toast_level = "SUCCESS"
             elif custom_tag in ("WARN", "WARNING"):
@@ -352,7 +355,7 @@ class AppApi:
                 toast_level = "WARN"
             elif level_key == "ERROR":
                 toast_level = "ERROR"
-            
+
             # 如果有对应的 Toast 级别，则推送
             if toast_level:
                 # 去除换行
@@ -362,7 +365,8 @@ class AppApi:
 
                 msg_plain_js = json.dumps(msg_plain, ensure_ascii=True)
                 level_js = json.dumps(toast_level, ensure_ascii=True)
-                self._window.evaluate_js(f"if(window.app && app.notifyToast) app.notifyToast({level_js}, {msg_plain_js})")
+                self._window.evaluate_js(
+                    f"if(window.app && app.notifyToast) app.notifyToast({level_js}, {msg_plain_js})")
 
         except Exception:
             pass
@@ -442,7 +446,8 @@ class AppApi:
             "active_theme": self._cfg_mgr.get_active_theme(),
             "installed_mods": self._logic.get_installed_mods(),
             "sights_path": sights_path,
-            "hwid": get_hwid()
+            "hwid": get_hwid(),
+            "telemetry_enabled": self._cfg_mgr.get_telemetry_enabled()
         }
 
     def save_theme_selection(self, filename):
@@ -452,6 +457,38 @@ class AppApi:
     def set_theme(self, mode):
         # 保存前端选择的主题模式（Light/Dark）到配置。
         self._cfg_mgr.set_theme_mode(mode)
+
+    def get_telemetry_status(self):
+        """
+        功能定位:
+        - 获取当前遥测开启状态。
+        """
+        return self._cfg_mgr.get_telemetry_enabled()
+
+    def set_telemetry_status(self, enabled):
+        """
+        功能定位:
+        - 设置遥测开启状态，并实时启动/停止后台服务。
+        """
+        self._cfg_mgr.set_telemetry_enabled(enabled)
+
+        # 无论开启还是关闭，都获取单例（如果尚未初始化则初始化）
+        tm = init_telemetry(APP_VERSION)
+
+        if enabled:
+            # 重新绑定回调
+            tm.set_server_message_callback(self.on_server_message)
+            tm.set_user_command_callback(self.on_user_command)
+            tm.set_log_callback(self._logger)
+
+            # 手动重启服务：先停止可能存在的旧循环，再启动新循环
+            tm.stop()
+            tm.start_heartbeat_loop()
+            tm.report_startup()
+            self._logger.info("[SYS] 遥测服务已启用")
+        else:
+            tm.stop()
+            self._logger.info("[SYS] 遥测服务已停用")
 
     def browse_folder(self):
         # 打开目录选择对话框，获取用户选择的游戏根目录并进行校验与保存。
@@ -467,6 +504,22 @@ class AppApi:
                 log.error(f"路径无效: {msg}")
                 return {"valid": False, "path": path, "msg": msg}
         return None
+
+    def get_installed_mods(self):
+        """
+        功能定位:
+        - 获取当前已安装在游戏目录下的模块 ID 列表。
+        输入输出:
+        - 参数: 无
+        - 返回: list[str]，已安装模块的 ID 集合。
+        - 外部资源/依赖: CoreService.get_installed_mods
+        实现逻辑:
+        - 调用逻辑层的 get_installed_mods 接口并返回。
+        业务关联:
+        - 上游: 前端切换路径或执行安装/还原后，用于同步界面状态。
+        - 下游: 无。
+        """
+        return self._logic.get_installed_mods()
 
     def start_auto_search(self):
         # 在后台线程执行游戏目录自动搜索，并将结果写入配置后通知前端更新显示。
@@ -562,7 +615,7 @@ class AppApi:
                         details["cover_url"] = f"data:image/{ext};base64,{b64_data}"
                 except Exception as e:
                     log.error(f"图片转码失败: {e}")
-            
+
             # 补充 ID
             details["id"] = mod
             result.append(details)
@@ -633,7 +686,7 @@ class AppApi:
             import os
             os.startfile(u)
         except Exception as e:
-            self.log_from_backend(f"[ERROR] 无法打开链接: {e}")
+            self._logger.error(f"[ERROR] 无法打开链接: {e}")
 
     # --- 辅助方法 ---
     def update_loading_ui(self, progress, message):
@@ -1180,7 +1233,7 @@ class AppApi:
                     )
             except Exception as e:
                 log.error(f"读取主题 {file.name} 失败: {e}")
-        
+
         return theme_list
 
     def load_theme_content(self, filename):
@@ -1210,7 +1263,7 @@ class AppApi:
         except Exception as e:
             log.error(f"搜索 UserSights 路径失败: {e}")
             return []
-    
+
     def select_uid_sights_path(self, uid):
         """根据 UID 选择并设置对应的 UserSights 路径"""
         try:
@@ -1623,7 +1676,6 @@ def main() -> int:
     # 绑定窗口对象到桥接层
     api.set_window(window)
 
-
     def _bind_drag_drop(win):
         # 绑定拖拽投放事件，用于在特定页面接收文件拖入并触发导入流程。
         try:
@@ -1674,7 +1726,6 @@ def main() -> int:
         except Exception:
             log.debug("绑定拖放事件失败", exc_info=True)
             return
-
 
     def _on_start(win):
         try:

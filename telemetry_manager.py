@@ -29,7 +29,7 @@ import requests
 class TelemetryManager:
     def __init__(self, app_version: str, report_url: Optional[str] = None):
         self._stop_heartbeat = None
-        self._is_connected = False
+        self._is_log_error = False
         self.app_version = app_version
 
         # 优先级：显式注入 > app_secrets > 默认接口
@@ -212,6 +212,7 @@ class TelemetryManager:
                 )
 
                 if response.status_code == 200 or response.status_code == 503:
+                    self._is_log_error = False
                     try:
                         data = response.json()
                         sys_config = data.get("sys_config")
@@ -223,10 +224,15 @@ class TelemetryManager:
                             self._cmd_callback(user_cmd)
                     except Exception:
                         pass
+                else:
+                    if self._log_callback and not self._is_log_error:
+                        self._log_callback.error(f"[遥测] 服务异常: {response.status_code}")
+                        self._is_log_error = True
 
             except Exception as e:
-                if self._log_callback:
-                    self._log_callback(f"[遥测] 服务交互异常: {type(e).__name__}", "DEBUG")
+                if self._log_callback and not self._is_log_error:
+                    self._log_callback.error(f"[遥测] 服务交互异常: {type(e).__name__}")
+                    self._is_log_error = True
 
         t = threading.Thread(target=_do_report, daemon=True, name="TelemetryStartup")
         t.start()
@@ -246,6 +252,11 @@ class TelemetryManager:
 
         thread = threading.Thread(target=_loop, name="TelemetryHeartbeat", daemon=True)
         thread.start()
+
+    def stop(self):
+        """停止心跳上报"""
+        if self._stop_heartbeat:
+            self._stop_heartbeat.set()
 
 
 _instance = None

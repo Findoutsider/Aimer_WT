@@ -1209,13 +1209,12 @@ i[class^="ri-"] {
 }
 
 .notice-content {
-    padding: 16px 24px 24px;
+    padding: 12px 20px;
     color: var(--text-main);
     font-size: 14px;
-    line-height: 1.8;
+    line-height: 1.5;
     overflow-y: auto;
     flex: 1;
-    white-space: pre-wrap; /* 关键修复：保留换行符 */
 }
 
 .notice-content strong {

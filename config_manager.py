@@ -31,6 +31,7 @@ class ConfigSaveError(ConfigError):
     """配置保存失败。"""
     pass
 
+
 # 配置文件固定存放在用户配置目录下的 Aimer_WT 资料夹
 def _get_default_config_dir():
     """
@@ -46,7 +47,7 @@ def _get_default_config_dir():
         ConfigError: 无法创建或访问配置目录时
     """
     system = platform.system()
-    
+
     if system == "Windows":
         # Windows: 用户文档目录
         config_base = Path.home() / "Documents" / "Aimer_WT"
@@ -60,7 +61,7 @@ def _get_default_config_dir():
             config_base = Path(xdg_config) / "Aimer_WT"
         else:
             config_base = Path.home() / ".config" / "Aimer_WT"
-    
+
     # 确保目录存在
     if not config_base.exists():
         try:
@@ -81,9 +82,11 @@ def _get_default_config_dir():
                 return Path(__file__).parent
     return config_base
 
+
 def _get_config_dir():
     """获取配置文件目录。"""
     return _get_default_config_dir()
+
 
 DOCS_DIR = _get_config_dir()
 CONFIG_FILE = DOCS_DIR / "settings.json"
@@ -98,7 +101,7 @@ class ConfigManager:
         config_file: 配置文件路径
         config: 配置字典
     """
-    
+
     # 默认配置模板
     DEFAULT_CONFIG = {
         "game_path": "",
@@ -109,12 +112,12 @@ class ConfigManager:
         "pending_dir": "",
         "library_dir": ""
     }
-    
+
     def __init__(self):
         """初始化配置管理器，加载或创建配置文件。"""
         self.config_dir = DOCS_DIR
         self.config_file = CONFIG_FILE
-        
+
         # 初始化默认配置并尝试从 settings.json 加载复盖
         self.config = self.DEFAULT_CONFIG.copy()
         self.load_config()
@@ -131,7 +134,7 @@ class ConfigManager:
         """
         encodings = ["utf-8-sig", "utf-8", "cp950", "big5", "gbk"]
         last_error = None
-        
+
         for enc in encodings:
             try:
                 with open(file_path, 'r', encoding=enc) as f:
@@ -145,7 +148,7 @@ class ConfigManager:
             except Exception as e:
                 last_error = e
                 continue
-        
+
         if last_error:
             log.error(f"无法读取配置文件 {file_path}: {last_error}")
         return None
@@ -160,7 +163,7 @@ class ConfigManager:
         if not self.config_file.exists():
             log.info("配置文件不存在，使用默认配置")
             return False
-            
+
         try:
             data = self._load_json_with_fallback(self.config_file)
             if isinstance(data, dict):
@@ -191,17 +194,17 @@ class ConfigManager:
             # 确保目录存在
             if not self.config_dir.exists():
                 self.config_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # 先写入临时文件，成功后再重命名（原子操作）
             temp_file = self.config_file.with_suffix('.tmp')
             with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(self.config, f, indent=4, ensure_ascii=False)
-            
+
             # 重命名为正式文件
             temp_file.replace(self.config_file)
             log.debug(f"配置已保存: {self.config_file}")
             return True
-            
+
         except PermissionError as e:
             log.error(f"保存配置文件失败（权限不足）: {e}")
             return False
@@ -375,3 +378,24 @@ class ConfigManager:
         """
         self.config["library_dir"] = str(path) if path else ""
         return self.save_config()
+
+    def get_telemetry_enabled(self):
+        """
+        功能定位:
+        - 读取遥测功能开启状态。
+        输入输出:
+        - 参数: 无
+        - 返回: bool，默认 True。
+        """
+        return bool(self.config.get("telemetry_enabled", True))
+
+    def set_telemetry_enabled(self, enabled):
+        """
+        功能定位:
+        - 更新遥测功能开启状态。
+        输入输出:
+        - 参数:
+          - enabled: bool，是否开启。
+        """
+        self.config["telemetry_enabled"] = bool(enabled)
+        self.save_config()
