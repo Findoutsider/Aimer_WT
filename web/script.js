@@ -253,77 +253,116 @@ const app = {
 
         try {
             const forceRefresh = !!(opts && opts.manual);
-            const res = await pywebview.api.get_skins_list({ force_refresh: forceRefresh });
+            // 改用异步接口，让扫描在后台进行，前端立即响应
+            pywebview.api.refresh_skins_async({ force_refresh: forceRefresh });
+        } catch (e) {
+            console.error(e);
+            this._skinsRefreshing = false;
+        }
+    },
+
+    // 接收后端异步推送的基本列表数据
+    onSkinsListReady(res) {
+        const listEl = document.getElementById('skins-list');
+        const countEl = document.getElementById('skins-count');
+        const refreshBtn = document.getElementById('btn-refresh-skins');
+
+        if (!listEl || !countEl || !res || !res.valid) {
+            this._skinsRefreshing = false;
+            if (refreshBtn) refreshBtn.classList.remove('is-loading');
+            return;
+        }
+
+        const items = res.items || [];
+        countEl.textContent = `本地: ${items.length}`;
+
+        if (items.length === 0) {
+            this._skinsLoaded = true;
+            this._skinsRefreshing = false;
+            if (refreshBtn) {
+                refreshBtn.disabled = false;
+                refreshBtn.classList.remove('is-loading');
+            }
+            listEl.innerHTML = `
+                <div class="empty-state" style="grid-column: 1 / -1;">
+                    <i class="ri-brush-3-line"></i>
+                    <h3>还没有涂装</h3>
+                    <p>拖入 ZIP 或点击“选择 ZIP 解压”，导入后会自动出现在这里</p>
+                </div>
+            `;
+            return;
+        }
+
+        // --- 分片渲染逻辑 ---
+        listEl.innerHTML = '';
+        const CHUNK_SIZE = 24;
+        let currentIndex = 0;
+        const seq = this._skinsRefreshSeq;
+
+        const renderChunk = () => {
             if (seq !== this._skinsRefreshSeq) return;
-            if (!camoPage.classList.contains('active')) return;
-            if (!skinsView.classList.contains('active')) return;
 
-            if (!res || !res.valid) {
-                this._skinsLoaded = false;
-                countEl.textContent = '本地: 0';
-                listEl.innerHTML = `
-                    <div class="empty-state" style="grid-column: 1 / -1;">
-                        <i class="ri-error-warning-line"></i>
-                        <h3>未设置有效游戏路径</h3>
-                        <p>请先在主页定位《战争雷霆》安装目录</p>
-                    </div>
-                `;
-                return;
-            }
-
-            const items = res.items || [];
-            countEl.textContent = `本地: ${items.length}`;
-
-            if (items.length === 0) {
-                this._skinsLoaded = true;
-                listEl.innerHTML = `
-                    <div class="empty-state" style="grid-column: 1 / -1;">
-                        <i class="ri-brush-3-line"></i>
-                        <h3>还没有涂装</h3>
-                        <p>拖入 ZIP 或点击“选择 ZIP 解压”，导入后会自动出现在这里</p>
-                    </div>
-                `;
-                return;
-            }
-
+            const chunk = items.slice(currentIndex, currentIndex + CHUNK_SIZE);
             const placeholder = 'assets/card_image_small.png';
-            listEl.innerHTML = items.map(it => {
+
+            const html = chunk.map(it => {
+                // 初始显示占位图或已有封面
                 const cover = it.cover_url || placeholder;
                 const isDefaultCover = !!it.cover_is_default;
                 const sizeText = app._formatBytes(it.size_bytes || 0);
+                const safeName = app._escapeHtml(it.name);
 
-                // Add edit button to the card
                 return `
-                    <div class="small-card" title="${app._escapeHtml(it.path || '')}">
+                    <div class="small-card animate-in" title="${app._escapeHtml(it.path || '')}" data-skin-name="${safeName}">
                         <div class="small-card-img-wrapper" style="position:relative;">
-                             <img class="small-card-img${isDefaultCover ? ' is-default-cover' : ''}" src="${cover}" alt="">
+                             <img class="small-card-img${isDefaultCover ? ' is-default-cover' : ''} skin-img-node" 
+                                  src="${cover}" loading="lazy" alt="">
                              <div class="skin-edit-overlay">
                                  <button class="btn-v2 icon-only small secondary skin-edit-btn"
-                                         onclick="app.openEditSkinModal('${app._escapeHtml(it.name)}', '${cover.replace(/'/g, "\\'")}')">
+                                         onclick="app.openEditSkinModal('${safeName}', this.closest('.small-card').querySelector('.skin-img-node').src)">
                                      <i class="ri-edit-line"></i>
                                  </button>
                              </div>
                         </div>
                         <div class="small-card-body">
                             <div class="skin-card-footer">
-                                <div class="skin-card-name" title="${app._escapeHtml(it.name || '')}">${app._escapeHtml(it.name || '')}</div>
+                                <div class="skin-card-name" title="${safeName}">${safeName}</div>
                                 <div class="skin-card-size">${sizeText}</div>
                             </div>
                         </div>
                     </div>
                 `;
             }).join('');
-            this._skinsLoaded = true;
-        } catch (e) {
-            console.error(e);
-        } finally {
-            this._skinsRefreshing = false;
-            if (refreshBtn) {
-                refreshBtn.disabled = false;
-                refreshBtn.classList.remove('is-loading');
+
+            listEl.insertAdjacentHTML('beforeend', html);
+            currentIndex += CHUNK_SIZE;
+
+            if (currentIndex < items.length) {
+                requestAnimationFrame(renderChunk);
+            } else {
+                this._skinsLoaded = true;
+                this._skinsRefreshing = false;
+                if (refreshBtn) {
+                    refreshBtn.disabled = false;
+                    refreshBtn.classList.remove('is-loading');
+                }
+            }
+        };
+
+        renderChunk();
+    },
+
+    // 接收后端异步推送的封面数据
+    onSkinCoverReady(skinName, coverUrl) {
+        const card = document.querySelector(`.small-card[data-skin-name="${CSS.escape(skinName)}"]`);
+        if (card) {
+            const img = card.querySelector('.skin-img-node');
+            if (img && img.src.includes('card_image_small.png')) {
+                img.src = coverUrl;
             }
         }
     },
+
 
     // --- Skin Editing Logic (New) ---
     currentEditSkin: null,
@@ -1217,7 +1256,7 @@ const app = {
     },
 
     // 自定义提示弹窗（替代原生 alert）
-    showAlert(title, message, iconType = 'info') {
+    showAlert(title, message, iconType = 'info', linkUrl = null) {
         const modal = document.getElementById('modal-alert');
         if (!modal) {
             console.error('modal-alert not found, falling back to native alert');
@@ -1228,9 +1267,21 @@ const app = {
         const titleEl = document.getElementById('alert-title');
         const msgEl = document.getElementById('alert-message');
         const iconEl = document.getElementById('alert-icon');
+        const linkBtn = document.getElementById('alert-link-btn');
 
         if (titleEl) titleEl.textContent = title || '提示';
         if (msgEl) msgEl.textContent = message || '';
+
+        // 处理跳转链接按钮
+        if (linkBtn) {
+            if (linkUrl) {
+                linkBtn.style.display = 'flex';
+                linkBtn.dataset.url = linkUrl;
+            } else {
+                linkBtn.style.display = 'none';
+                linkBtn.dataset.url = '';
+            }
+        }
 
         // 根据类型设置图标
         if (iconEl) {
@@ -1251,6 +1302,14 @@ const app = {
 
         modal.classList.remove('hiding');
         modal.classList.add('show');
+    },
+
+    // 动态更新首页公告栏文字
+    updateNoticeBar(contentHtml) {
+        const container = document.querySelector('.notice-content');
+        if (container && contentHtml) {
+            container.innerHTML = contentHtml;
+        }
     },
 
     recoverToSafeState(reason) {
@@ -1314,7 +1373,7 @@ const app = {
     },
 
     // --- 路径搜索逻辑 ---
-    updatePathUI(path, valid) {
+    async updatePathUI(path, valid) {
         const input = document.getElementById('input-game-path');
         const statusIcon = document.getElementById('status-icon');
         const statusText = document.getElementById('status-text');
@@ -1327,16 +1386,31 @@ const app = {
             statusIcon.className = 'status-icon active';
             statusText.textContent = '连接正常';
             statusText.className = 'status-text success';
+
+            try {
+                if (window.pywebview && pywebview.api && pywebview.api.get_installed_mods) {
+                    this.installedModIds = await pywebview.api.get_installed_mods() || [];
+                }
+            } catch (e) {
+                console.error("Failed to update installed mods:", e);
+                this.installedModIds = [];
+            }
         } else if (!path) {
             statusIcon.innerHTML = '<i class="ri-wifi-off-line"></i>';
             statusIcon.className = 'status-icon';
             statusText.textContent = '未设置路径';
             statusText.className = 'status-text waiting';
+            this.installedModIds = [];
         } else {
             statusIcon.innerHTML = '<i class="ri-error-warning-line"></i>';
             statusIcon.className = 'status-icon';
             statusText.textContent = '路径无效';
             statusText.className = 'status-text error';
+            this.installedModIds = [];
+        }
+
+        if (this.modCache && this.modCache.length > 0) {
+            this.renderList(this.modCache);
         }
     },
 
@@ -1354,6 +1428,23 @@ const app = {
         } catch (e) {
             console.error('browsePath failed:', e);
             this.showAlert('错误', '选择路径失败: ' + e.message, 'error');
+        }
+    },
+
+    async toggleTelemetry(checked) {
+        const toggle = document.getElementById('telemetry-switch');
+        // 先还原 UI 状态，等待确认
+        toggle.checked = !checked;
+        const action = checked ? "开启" : "关闭";
+        const message = checked
+            ? "开启遥测功能将允许软件发送匿名的使用统计与环境数据，帮助开发者改进软件体验。<br><br>确认要开启吗？"
+            : "关闭遥测功能后，开发者将无法收到您的使用反馈与统计，这可能会影响版本迭代方向。<br><br>确认要关闭吗？";
+        // 关闭时显示红色确认按钮，开启时显示普通按钮
+        const isDanger = !checked;
+        const yes = await app.confirm(`确认${action}遥测`, message, isDanger);
+        if (yes) {
+            toggle.checked = checked; // 用户确认，应用新状态
+            await pywebview.api.set_telemetry_status(checked);
         }
     },
 
@@ -1431,7 +1522,7 @@ const app = {
         if (this._libraryRefreshing) return;
         const isManual = !!(opts && opts.manual);
         if (!isManual && this._libraryLoaded) return;
-        
+
         // 检查 API 是否就绪
         if (!window.pywebview?.api?.get_library_list) {
             console.warn('refreshLibrary: API not ready, will retry later');
@@ -1442,7 +1533,7 @@ const app = {
             }, 1000);
             return;
         }
-        
+
         this._libraryRefreshing = true;
 
         listContainer.classList.add('fade-out');
@@ -1553,29 +1644,31 @@ const app = {
             if (mod.capabilities.pilot) tagsHtml += `<span class="tag pilot">飞行员语音</span>`;
         }
 
-        let langList = [];
+        let fullLangList = [];
         if (mod.language && Array.isArray(mod.language) && mod.language.length > 0) {
-            langList = mod.language;
+            fullLangList = mod.language;
         } else if (mod.language && typeof mod.language === 'string') {
-            // 兼容如果是字符串的情况
-            langList = [mod.language];
+            fullLangList = [mod.language];
         } else {
-            // 如果后端没返回，或者是旧数据
-            if (mod.title.includes("Aimer") || mod.id === "Aimer") {
-                langList = ["中", "美", "俄"];
-            } else {
-                langList = ["多语言"];
-            }
+            fullLangList = (mod.title.includes("Aimer") || mod.id === "Aimer") ? ["中", "美", "俄"] : ["未识别"];
         }
 
-        const langHtml = langList.map(lang => {
-            // 语言样式映射优先使用 UI_CONFIG.langMap
+        // 过滤出主要展示语言 (中/美/英)
+        let displayLangs = fullLangList.filter(lang => ["中", "美", "英"].includes(lang));
+        if (displayLangs.length === 0) {
+            displayLangs = fullLangList.includes("未识别") ? ["未识别"] : ["其他"];
+        }
+
+        const langHtml = displayLangs.map(lang => {
             let cls = "";
             if (typeof UI_CONFIG !== 'undefined' && UI_CONFIG.langMap[lang]) {
                 cls = UI_CONFIG.langMap[lang];
             }
             return `<span class="lang-text ${cls}">${lang}</span>`;
         }).join('<span style="margin:0 2px">/</span>');
+
+        // 拼接悬停显示的完整列表
+        const langTooltip = fullLangList.length > 0 ? `支持语言: ${fullLangList.join(', ')}` : '未识别语言';
 
         const updateDate = mod.date || "未知日期";
 
@@ -1624,15 +1717,20 @@ const app = {
                     <i class="ri-hard-drive-2-line"></i> <span>${mod.size_str}</span>
                     <span style="margin: 0 5px; color:#ddd">|</span>
                     
-                    <i class="ri-translate"></i> 
-                    <span style="margin-left:2px">${langHtml}</span>
+                    <div class="mod-lang-wrap" title="${langTooltip}" style="display:inline-flex; align-items:center; cursor:help;">
+                        <i class="ri-translate"></i> 
+                        <span style="margin-left:2px">${langHtml || '未识别'}</span>
+                    </div>
                 </div>
 
-                <div class="mod-tags">
-                    ${tagsHtml}
+                <div class="mod-meta-row" style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; min-height: 20px;">
+                    ${mod.files && mod.files.length > 0 ?
+                mod.files.map(f => `<span class="tag ${f.cls || 'default'}" title="包含模块: ${f.type}">${f.type}</span>`).join('')
+                : tagsHtml
+            }
                 </div>
                 
-                <div style="font-size:11px; color:var(--text-log); opacity:0.6; margin-bottom:8px; display:flex; align-items:center; gap:4px;">
+                <div style="font-size:11px; color:var(--text-log); opacity:0.6; margin: 6px 0 8px; display:flex; align-items:center; gap:4px;">
                     <i class="ri-time-line"></i> 更新于: ${updateDate}
                 </div>
 
@@ -1819,11 +1917,17 @@ const app = {
     openExternal(url) {
         const u = String(url || '').trim();
         if (!u) return;
-        try {
-            window.open(u, '_blank', 'noopener');
-        } catch (e) {
-            console.error(e);
-            this.showAlert('错误', '打开链接失败', 'error');
+
+        // 优先使用后端 API 以在外部浏览器打开，并处理协议头
+        if (window.pywebview?.api?.open_external) {
+            pywebview.api.open_external(u);
+        } else {
+            // 降级方案
+            let finalUrl = u;
+            if (!finalUrl.match(/^[a-zA-Z]+:\/\//)) {
+                finalUrl = 'https://' + finalUrl;
+            }
+            window.open(finalUrl, '_blank', 'noopener');
         }
     },
 
@@ -1911,59 +2015,58 @@ app.openInstallModal = async function (modId) {
     const container = document.getElementById('install-toggles');
     container.innerHTML = '';
 
-    // 新逻辑：基于文件夹列表
-    const folders = mod.folders || [];
+    const fileGroups = mod.files || [];
 
-    if (folders.length === 0) {
-        container.innerHTML = '<div class="no-folders" style="padding:20px;text-align:center;color:#888;">⚠️ 未检测到有效语音包文件夹 (不含 .bank 文件)</div>';
+    if (fileGroups.length === 0) {
+        container.innerHTML = '<div class="no-folders" style="padding:20px;text-align:center;color:#888;">⚠️ 未检测到有效语音文件</div>';
     } else {
-        folders.forEach(item => {
-            // 兼容旧版字符串格式 (防止报错)
-            let folderPath = "";
-            let folderType = "folder";
-
-            if (typeof item === 'string') {
-                folderPath = item;
-            } else {
-                folderPath = item.path;
-                folderType = item.type || "folder";
-            }
-
+        fileGroups.forEach(group => {
             const div = document.createElement('div');
             // 默认全选
             div.className = 'toggle-btn available selected';
-            div.dataset.key = folderPath;
+            div.dataset.key = group.code; // 使用 code 作为标识
+            div.dataset.files = JSON.stringify(group.files); // 存储文件列表
 
-            // 截断逻辑：超过4个字，第3个字后加...
-            let displayName = folderPath;
-            // 如果是 "根目录"，显示为 "根目录"
-            if (folderPath === "根目录") {
-                displayName = "根目录";
-            } else {
-                // 取最后一段路径名显示 (如果路径很长)
-                const parts = folderPath.split(/[/\\]/);
-                const name = parts[parts.length - 1];
-                if (name.length > 4) {
-                    displayName = name.substring(0, 3) + '...';
-                } else {
-                    displayName = name;
-                }
-            }
+            // 显示名称和文件数量
+            const displayName = group.type;
+            const fileCount = group.count;
 
             // 根据类型选择图标
-            let iconClass = "ri-folder-3-line";
-            if (folderType === "ground") iconClass = "ri-car-line"; // 陆战
-            else if (folderType === "radio") iconClass = "ri-radio-2-line"; // 无线电
-            else if (folderType === "aircraft") iconClass = "ri-plane-line"; // 空战
+            let iconClass = "ri-file-music-line"; // 默认音频图标
 
-            div.innerHTML = `<i class="${iconClass}"></i><div class="label">${displayName}</div>`;
+            if (group.code.includes('ground') || group.code.includes('tank')) {
+                iconClass = "ri-car-line";
+            }
+            // 无线电/通用语音
+            else if (group.code.includes('common') || group.code.includes('dialogs_chat')) {
+                iconClass = "ri-radio-2-line";
+            }
+            // 空战相关
+            else if (group.code.includes('aircraft')) {
+                iconClass = "ri-plane-line";
+            }
+            // 海战相关
+            else if (group.code.includes('ships') || group.code.includes('naval')) {
+                iconClass = "ri-ship-line";
+            }
+            // 步兵相关
+            else if (group.code.includes('infantry')) {
+                iconClass = "ri-user-line";
+            }
+            // 降噪包
+            else if (group.code.includes('masterbank')) {
+                iconClass = "ri-volume-mute-line";
+            }
+            div.innerHTML = `<i class="${iconClass}"></i><div class="label">${displayName} <span style="opacity:0.6;font-size:11px;">(${fileCount})</span></div>`;
+
 
             div.onclick = () => {
                 div.classList.toggle('selected');
             };
 
             // Tooltip 交互
-            div.onmouseenter = (e) => app.showTooltip(div, folderPath);
+            const tooltipText = `${displayName}\n包含 ${fileCount} 个文件`;
+            div.onmouseenter = (e) => app.showTooltip(div, tooltipText);
             div.onmouseleave = () => app.hideTooltip();
 
             container.appendChild(div);
@@ -1975,13 +2078,23 @@ app.openInstallModal = async function (modId) {
 
 document.getElementById('btn-confirm-install').onclick = async function () {
     const toggles = document.querySelectorAll('#install-toggles .toggle-btn.selected');
-    const selection = Array.from(toggles).map(el => el.dataset.key);
+
+    // 收集所有选中类型的文件列表
+    let allFiles = [];
+    toggles.forEach(el => {
+        try {
+            const files = JSON.parse(el.dataset.files || '[]');
+            allFiles = allFiles.concat(files);
+        } catch (e) {
+            console.error('解析文件列表失败:', e);
+        }
+    });
 
     // 如果列表为空（说明可能是全量安装模式，或者用户没选）
     // 但如果有 toggle 存在却没选，那就是用户取消了所有
     const hasToggles = document.querySelectorAll('#install-toggles .toggle-btn').length > 0;
 
-    if (hasToggles && selection.length === 0) {
+    if (hasToggles && allFiles.length === 0) {
         app.showAlert("提示", "请至少选择一个模块！");
         return;
     }
@@ -1993,8 +2106,8 @@ document.getElementById('btn-confirm-install').onclick = async function () {
     conflictBtn.innerHTML = '<i class="ri-loader-4-line ri-spin"></i> 检查中...';
 
     try {
-        // 将数组参数序列化为 JSON 字符串传递给后端
-        const conflicts = await pywebview.api.check_install_conflicts(app.currentModId, JSON.stringify(selection));
+        // 将文件列表序列化为 JSON 字符串传递给后端
+        const conflicts = await pywebview.api.check_install_conflicts(app.currentModId, JSON.stringify(allFiles));
 
         if (conflicts && conflicts.length > 0) {
             // 构建冲突提示信息
@@ -2032,8 +2145,8 @@ document.getElementById('btn-confirm-install').onclick = async function () {
         MinimalistLoading.show(false, "正在准备安装...");
     }
 
-    // 将数组参数序列化为 JSON 字符串传递给后端
-    pywebview.api.install_mod(app.currentModId, JSON.stringify(selection));
+    // 将文件列表序列化为 JSON 字符串传递给后端
+    pywebview.api.install_mod(app.currentModId, JSON.stringify(allFiles));
     app.closeModal('modal-install');
     app.switchTab('home'); // 跳转回主页看日志
 };
@@ -2213,6 +2326,11 @@ app.init = async function () {
         // 1. 优先检查免责声明
         await app.checkDisclaimer();
 
+        // 1.2 全局拖放初始化 (暂时禁用)
+        // TODO 需要优化，拖放压缩包时大概率卡死
+        // if (app.setupGlobalDragDrop) app.setupGlobalDragDrop();
+
+
         // 2. 获取初始状态
         const state = await pywebview.api.init_app_state() || {
             game_path: "",
@@ -2281,6 +2399,11 @@ app.init = async function () {
                 document.body.classList.remove('drag-disabled');
             });
         });
+
+        const telSwitch = document.getElementById('telemetry-switch');
+        if (telSwitch) {
+            telSwitch.checked = !!state.telemetry_enabled;
+        }
     };
 
     // 防止重複註册 pywebviewready 监听器
@@ -2571,7 +2694,7 @@ app.refreshSights = async function (opts) {
 app.loadLibraryPathInfo = async function () {
     const pendingInput = document.getElementById('pending-dir-input');
     const libraryInput = document.getElementById('library-dir-input');
-    
+
     // 检查 API 是否可用
     if (!window.pywebview || !window.pywebview.api || typeof window.pywebview.api.get_library_path_info !== 'function') {
         console.warn('loadLibraryPathInfo: API not ready');
@@ -2584,7 +2707,7 @@ app.loadLibraryPathInfo = async function () {
         console.log('loadLibraryPathInfo: calling API...');
         const info = await pywebview.api.get_library_path_info();
         console.log('loadLibraryPathInfo: got info', info);
-        
+
         if (pendingInput && info) {
             if (info.custom_pending_dir) {
                 pendingInput.value = info.custom_pending_dir;
@@ -2752,7 +2875,7 @@ app.resetLibraryPaths = async function () {
         const libraryInput = document.getElementById('library-dir-input');
         if (pendingInput) pendingInput.value = '';
         if (libraryInput) libraryInput.value = '';
-        
+
         this.showInfoToast('已重置', '路径已重置为默认值');
         // 重新加载以更新 placeholder
         await this.loadLibraryPathInfo();
@@ -2779,14 +2902,14 @@ app.copyPathToClipboard = async function (inputId) {
 
     try {
         await navigator.clipboard.writeText(path);
-        
+
         // 显示複製成功的视觉反馈
         const btn = input.parentElement.querySelector('.path-copy-btn');
         if (btn) {
             btn.classList.add('copied');
             setTimeout(() => btn.classList.remove('copied'), 1500);
         }
-        
+
         this.showInfoToast('已复制', '路径已复制到剪贴板');
     } catch (e) {
         console.error('复制失败:', e);
@@ -2860,33 +2983,116 @@ app.showConfirmDialog = function (title, message) {
         const msgEl = document.getElementById('confirm-message');
         const cancelBtn = document.getElementById('btn-confirm-cancel');
         const okBtn = document.getElementById('btn-confirm-ok');
-        
+
         if (!modal || !titleEl || !msgEl) {
             resolve(false);
             return;
         }
-        
+
         titleEl.textContent = title;
         msgEl.innerHTML = message;
         okBtn.innerHTML = '<i class="ri-check-line"></i> 确认';
         okBtn.className = 'btn primary';
-        
+
         const cleanup = () => {
             modal.classList.remove('show');
             cancelBtn.onclick = null;
             okBtn.onclick = null;
         };
-        
+
         cancelBtn.onclick = () => {
             cleanup();
             resolve(false);
         };
-        
+
         okBtn.onclick = () => {
             cleanup();
             resolve(true);
         };
-        
+
         modal.classList.add('show');
     });
 };
+
+/**
+ * 全局拖放识别逻辑 (Global Drag & Drop Setup)
+ * 功能：在特定页面监听文件拖入，并显示高级视觉反馈。
+ */
+app._dragCounter = 0;
+app.hideDropOverlay = function () {
+    const overlay = document.getElementById('drop-overlay');
+    if (overlay) overlay.classList.remove('active');
+    app._dragCounter = 0;
+};
+
+app.setupGlobalDragDrop = function () {
+    const overlay = document.getElementById('drop-overlay');
+    if (!overlay) return;
+
+    // 定义允许显示拖放层的页面 (包括首页)
+    const allowedPages = ['page-home', 'page-lib', 'page-camo', 'page-sight'];
+
+    const canShow = () => {
+        const activePageEl = document.querySelector('.page.active');
+        if (!activePageEl) return false;
+        const activePageId = activePageEl.id;
+
+        // 额外的逻辑判断：如果在炮镜库则也允许
+        if (activePageId === 'page-camo') {
+            const sightsView = document.getElementById('view-sights');
+            if (sightsView && sightsView.classList.contains('active')) return true;
+        }
+
+        return allowedPages.includes(activePageId);
+    };
+
+    window.addEventListener('dragenter', (e) => {
+        if (!canShow()) return;
+        e.preventDefault();
+        app._dragCounter++;
+        if (app._dragCounter === 1) {
+            // --- 动态更新提示文本 ---
+            const activePageEl = document.querySelector('.page.active');
+            const textEl = overlay.querySelector('.drop-overlay-text');
+            if (activePageEl && textEl) {
+                const id = activePageEl.id;
+                if (id === 'page-lib' || id === 'page-home') {
+                    textEl.innerText = '放下并导入语音包';
+                } else if (id === 'page-camo') {
+                    const sightsView = document.getElementById('view-sights');
+                    if (sightsView && sightsView.classList.contains('active')) {
+                        textEl.innerText = '放下并导入炮镜';
+                    } else {
+                        textEl.innerText = '放下并导入涂装';
+                    }
+                } else if (id === 'page-sight') {
+                    textEl.innerText = '放下并导入信息/炮镜';
+                }
+            }
+            overlay.classList.add('active');
+        }
+    });
+
+    window.addEventListener('dragover', (e) => {
+        if (!canShow()) return;
+        e.preventDefault();
+        if (!overlay.classList.contains('active')) {
+            overlay.classList.add('active');
+        }
+    });
+
+    window.addEventListener('dragleave', (e) => {
+        if (!canShow()) return;
+        e.preventDefault();
+        app._dragCounter--;
+        if (app._dragCounter <= 0) {
+            app.hideDropOverlay();
+        }
+    });
+
+    window.addEventListener('drop', (e) => {
+        e.preventDefault();
+        app.hideDropOverlay();
+    });
+};
+

@@ -10,6 +10,7 @@ import threading
 import time
 import platform
 import subprocess
+
 try:
     import webview
 except Exception as _e:
@@ -23,7 +24,9 @@ from library_manager import ArchivePasswordCanceled, LibraryManager
 from logger import setup_logger, get_logger, set_ui_callback
 from sights_manager import SightsManager
 from skins_manager import SkinsManager
+from telemetry_manager import init_telemetry, get_hwid
 
+APP_VERSION = "2.1.0"
 AGREEMENT_VERSION = "2026-01-10"
 
 # 资源目录定位：打包环境使用 _MEIPASS，开发环境使用源码目录
@@ -153,6 +156,7 @@ def _parse_cli_args(argv: list[str] | None = None) -> argparse.Namespace:
     except Exception:
         return argparse.Namespace(allow_fallback=False, perf=False)
 
+
 class AppApi:
     # 提供前端可调用的后端 API 集合，并协调配置、库管理、安装与资源管理等模块。
 
@@ -165,10 +169,10 @@ class AppApi:
         self._perf_enabled = bool(perf_enabled)
 
         # 保存 PyWebview Window 引用（用于调用 evaluate_js 与打开系统对话框）
-        
+
         # 连接 logger -> 前端 UI（窗口未创建时会自动忽略）
         set_ui_callback(self._append_log_to_ui)
-        
+
         # [关键修复] 将 window 改为 _window。
         # 加下划线表示私有变量，pywebview 就不会尝试去扫描和序列化整个窗口对象，
         # 从而避免了 "window.native... maximum recursion depth" 错误。
@@ -177,7 +181,7 @@ class AppApi:
         # 管理器实例：配置、语音包库、涂装、炮镜、游戏目录操作
         # 注意：所有管理器现在统一使用 logger.py 的日誌系统
         self._cfg_mgr = ConfigManager()
-        
+
         # 从配置读取自定义路径
         custom_pending = self._cfg_mgr.get_pending_dir()
         custom_library = self._cfg_mgr.get_library_dir()
@@ -185,10 +189,17 @@ class AppApi:
             pending_dir=custom_pending if custom_pending else None,
             library_dir=custom_library if custom_library else None
         )
-        
+
         self._skins_mgr = SkinsManager()
         self._sights_mgr = SightsManager()
         self._logic = CoreService()
+
+        # 初始化遥测系统
+        if self._cfg_mgr.get_telemetry_enabled():
+            tm = init_telemetry(APP_VERSION)
+            tm.set_server_message_callback(self.on_server_message)
+            tm.set_user_command_callback(self.on_user_command)
+            tm.set_log_callback(self._logger)
 
         self._search_running = False
         self._is_busy = False
@@ -196,6 +207,93 @@ class AppApi:
         self._password_lock = threading.Lock()
         self._password_value = None
         self._password_cancelled = False
+
+        # 遥测消息去重
+        self._last_alert_content = None  # 紧急通知 (弹窗)
+        self._last_notice_content = None  # 公告栏 (左下角的)
+        self._last_update_content = None  # 更新提示
+        self._last_maintenance_status = None  # 维护模式
+        self._last_announce_content = None  # 兼容以前的 key (可选)
+
+    def on_server_message(self, config: dict):
+        """处理服务端下发的系统消息（公告/更新/维护）"""
+        if not self._window:
+            return
+
+        def safe_js_call(func_name, *args):
+            # 将参数序列化为 JSON 字符串，确保特殊字符（引号、换行）被正确转义
+            js_args = ", ".join([json.dumps(arg, ensure_ascii=False) for arg in args])
+            return f"if(window.app && app.{func_name}) app.{func_name}({js_args})"
+
+        try:
+            # 1. 维护模式处理 (状态发生变化时才提示)
+            is_maint = config.get("maintenance", False)
+            maint_msg = config.get("maintenance_msg", "")
+            maint_key = f"{is_maint}:{maint_msg}"
+
+            if is_maint and (self._last_maintenance_status != maint_key):
+                self._logger.warning(f"[SYS] ⚠️ 维护模式已开启: {maint_msg}")
+                self._window.evaluate_js(safe_js_call("showWarnToast", "维护模式已开启", maint_msg, 8000))
+
+            self._last_maintenance_status = maint_key
+
+            # 2. 紧急通知弹窗 (Alert - 内容变化时才提示)
+            if config.get("alert_active"):
+                title = config.get("alert_title", "系统通知")
+                content = config.get("alert_content", "")
+                full_alert_key = f"{title}|{content}"
+
+                if content and (self._last_alert_content != full_alert_key):
+                    self._logger.info(f"[通知] {title}")
+                    self._window.evaluate_js(safe_js_call("showAlert", title, content, "info"))
+                    self._last_alert_content = full_alert_key
+
+            # 3. 公告栏常驻内容 (Notice - 发现有效内容则覆盖首页公告)
+            if config.get("notice_active"):
+                notice_content = config.get("notice_content", "")
+                if notice_content and (self._last_notice_content != notice_content):
+                    self._window.evaluate_js(safe_js_call("updateNoticeBar", notice_content))
+                    self._last_notice_content = notice_content
+
+            # 4. 更新提示 (内容变化时才提示)
+            if config.get("update_active"):
+                content = config.get("update_content", "")
+                update_url = config.get("update_url", "")
+
+                update_key = f"{content}|{update_url}"
+                if content and (self._last_update_content != update_key):
+                    self._logger.info(f"[更新] {content}")
+                    self._window.evaluate_js(safe_js_call("showAlert", "发现新版本", content, "success", update_url))
+                    self._last_update_content = update_key
+
+        except Exception as e:
+            print(f"消息处理异常: {e}")
+
+    def on_user_command(self, cmd_json: str):
+        """处理针对当前用户的特定指令驱动"""
+        if not self._window:
+            return
+
+        import json
+        try:
+            cmd = json.loads(cmd_json)
+            cmd_type = cmd.get("type")
+            msg = cmd.get("message", "")
+
+            # 序列化辅助
+            def safe_js_call(func_name, *args):
+                js_args = ", ".join([json.dumps(arg, ensure_ascii=False) for arg in args])
+                return f"if(window.app && app.{func_name}) app.{func_name}({js_args})"
+
+            if cmd_type == "popup":
+                self._logger.info("[CMD] 收到系统通知")
+                self._window.evaluate_js(safe_js_call("showAlert", "系统通知", msg, "info"))
+            elif cmd_type == "toast":
+                self._logger.info(f"[CMD] 收到管理员信息: {msg}")
+                self._window.evaluate_js(safe_js_call("showWarnToast", "管理员消息", msg, 5000))
+
+        except Exception as e:
+            print(f"专用指令解析异常: {e}")
 
     def set_window(self, window):
         # 绑定 PyWebview Window 实例到桥接层，供后续 API 调用使用。
@@ -219,7 +317,7 @@ class AppApi:
         """
         if not self._window:
             return
-        
+
         # 1. 追加日志到面板
         try:
             safe_msg = formatted_message.replace("\r", "").replace("\n", "<br>")
@@ -233,7 +331,7 @@ class AppApi:
         # 我们可以根据 record.message 或 record.levelname 判断是否弹窗。
         # 以前的逻辑是：如果 levelKey in (WARN, ERROR, SUCCESS) 则弹窗。
         # 这里我们需要从 message 探测 [SUCCESS] 这种自定义标签，因为 standard logging 只有 INFO/WARN/ERROR。
-        
+
         try:
             level_key = record.levelname  # INFO, WARNING, ERROR, DEBUG
             msg_content = record.getMessage()
@@ -241,12 +339,12 @@ class AppApi:
             # 兼容：从消息内容解析 [SUCCESS] / [WARN] / [ERROR] 等标签
             # 如果消息里显式写了 [SUCCESS]，我们认为它是 SUCCESS 级别
             import re
-            match = re.search(r"^\s*\[(SUCCESS|WARN|ERROR|INFO|SYS)\]", msg_content)
+            match = re.search(r"^\s*\[(SUCCESS|WARN|ERROR|INFO|SYS)]", msg_content)
             custom_tag = match.group(1) if match else None
 
             # 映射到前端 Toast 类型
             toast_level = None
-            
+
             if custom_tag == "SUCCESS":
                 toast_level = "SUCCESS"
             elif custom_tag in ("WARN", "WARNING"):
@@ -257,7 +355,7 @@ class AppApi:
                 toast_level = "WARN"
             elif level_key == "ERROR":
                 toast_level = "ERROR"
-            
+
             # 如果有对应的 Toast 级别，则推送
             if toast_level:
                 # 去除换行
@@ -267,7 +365,8 @@ class AppApi:
 
                 msg_plain_js = json.dumps(msg_plain, ensure_ascii=True)
                 level_js = json.dumps(toast_level, ensure_ascii=True)
-                self._window.evaluate_js(f"if(window.app && app.notifyToast) app.notifyToast({level_js}, {msg_plain_js})")
+                self._window.evaluate_js(
+                    f"if(window.app && app.notifyToast) app.notifyToast({level_js}, {msg_plain_js})")
 
         except Exception:
             pass
@@ -346,7 +445,9 @@ class AppApi:
             "theme": theme,
             "active_theme": self._cfg_mgr.get_active_theme(),
             "installed_mods": self._logic.get_installed_mods(),
-            "sights_path": sights_path
+            "sights_path": sights_path,
+            "hwid": get_hwid(),
+            "telemetry_enabled": self._cfg_mgr.get_telemetry_enabled()
         }
 
     def save_theme_selection(self, filename):
@@ -356,6 +457,38 @@ class AppApi:
     def set_theme(self, mode):
         # 保存前端选择的主题模式（Light/Dark）到配置。
         self._cfg_mgr.set_theme_mode(mode)
+
+    def get_telemetry_status(self):
+        """
+        功能定位:
+        - 获取当前遥测开启状态。
+        """
+        return self._cfg_mgr.get_telemetry_enabled()
+
+    def set_telemetry_status(self, enabled):
+        """
+        功能定位:
+        - 设置遥测开启状态，并实时启动/停止后台服务。
+        """
+        self._cfg_mgr.set_telemetry_enabled(enabled)
+
+        # 无论开启还是关闭，都获取单例（如果尚未初始化则初始化）
+        tm = init_telemetry(APP_VERSION)
+
+        if enabled:
+            # 重新绑定回调
+            tm.set_server_message_callback(self.on_server_message)
+            tm.set_user_command_callback(self.on_user_command)
+            tm.set_log_callback(self._logger)
+
+            # 手动重启服务：先停止可能存在的旧循环，再启动新循环
+            tm.stop()
+            tm.start_heartbeat_loop()
+            tm.report_startup()
+            self._logger.info("[SYS] 遥测服务已启用")
+        else:
+            tm.stop()
+            self._logger.info("[SYS] 遥测服务已停用")
 
     def browse_folder(self):
         # 打开目录选择对话框，获取用户选择的游戏根目录并进行校验与保存。
@@ -371,6 +504,22 @@ class AppApi:
                 log.error(f"路径无效: {msg}")
                 return {"valid": False, "path": path, "msg": msg}
         return None
+
+    def get_installed_mods(self):
+        """
+        功能定位:
+        - 获取当前已安装在游戏目录下的模块 ID 列表。
+        输入输出:
+        - 参数: 无
+        - 返回: list[str]，已安装模块的 ID 集合。
+        - 外部资源/依赖: CoreService.get_installed_mods
+        实现逻辑:
+        - 调用逻辑层的 get_installed_mods 接口并返回。
+        业务关联:
+        - 上游: 前端切换路径或执行安装/还原后，用于同步界面状态。
+        - 下游: 无。
+        """
+        return self._logic.get_installed_mods()
 
     def start_auto_search(self):
         # 在后台线程执行游戏目录自动搜索，并将结果写入配置后通知前端更新显示。
@@ -466,7 +615,7 @@ class AppApi:
                         details["cover_url"] = f"data:image/{ext};base64,{b64_data}"
                 except Exception as e:
                     log.error(f"图片转码失败: {e}")
-            
+
             # 补充 ID
             details["id"] = mod
             result.append(details)
@@ -509,6 +658,35 @@ class AppApi:
                 log.error(f"打开 UserSkins 失败: {e}")
 
         # 未列入允许名单的 folder_type 不执行任何操作
+
+    def open_external(self, url):
+        """
+        功能定位:
+        - 在系统默认浏览器中打开指定的 URL。
+
+        输入输出:
+        - 参数:
+          - url: str，要打开的链接。
+        - 返回: None
+        - 外部资源/依赖: os.startfile 或 webbrowser
+
+        实现逻辑:
+        - 校验协议，若无则补充 https://。
+        - 使用 os.startfile (Windows) 打开连接。
+        """
+        if not url:
+            return
+
+        import re
+        u = str(url).strip()
+        if not re.match(r'^[a-zA-Z]+://', u):
+            u = "https://" + u
+
+        try:
+            import os
+            os.startfile(u)
+        except Exception as e:
+            self._logger.error(f"[ERROR] 无法打开链接: {e}")
 
     # --- 辅助方法 ---
     def update_loading_ui(self, progress, message):
@@ -687,28 +865,117 @@ class AppApi:
         else:
             pass
 
-    def get_skins_list(self, opts=None):
-        # 扫描游戏目录下的 UserSkins 并返回前端渲染所需的涂装列表数据。
-        path = self._cfg_mgr.get_game_path()
-        valid, msg = self._logic.validate_game_path(path)
-        if not valid:
-            return {
-                "valid": False,
-                "msg": msg or "未设置有效游戏路径",
-                "exists": False,
-                "path": "",
-                "items": [],
-            }
+    def import_voice_zip_from_path(self, zip_path):
+        """导入指定路径的压缩包"""
+        if self._is_busy:
+            log.warning("另一个任务正在进行中，请稍候...")
+            return False
 
-        default_cover_path = WEB_DIR / "assets" / "card_image_small.png"
+        zip_path = str(zip_path)
+        self._is_busy = True
+
+        if self._window:
+            msg_js = json.dumps(f"准备导入: {Path(zip_path).name}", ensure_ascii=False)
+            self._window.evaluate_js(
+                f"if(window.MinimalistLoading) MinimalistLoading.show(false, {msg_js})"
+            )
+
+        def _run():
+            try:
+                self.update_loading_ui(1, f"正在读取: {Path(zip_path).name}")
+
+                def password_provider(archive_path, reason):
+                    hint = "密码错误，请重试" if reason == "incorrect" else ""
+                    return self._request_archive_password(Path(archive_path).name, hint)
+
+                self._lib_mgr.unzip_single_zip(
+                    Path(zip_path),
+                    progress_callback=self.update_loading_ui,
+                    password_provider=password_provider,
+                )
+
+                if self._window:
+                    self._window.evaluate_js("app.refreshLibrary()")
+                    msg_js = json.dumps("导入完成", ensure_ascii=False)
+                    self._window.evaluate_js(
+                        f"if(window.MinimalistLoading) MinimalistLoading.update(100, {msg_js})"
+                    )
+            except ArchivePasswordCanceled:
+                log.warning("已取消输入密码，导入已终止")
+                if self._window:
+                    self._window.evaluate_js("if(window.MinimalistLoading) MinimalistLoading.hide()")
+            except Exception as e:
+                log.error(f"导入失败: {e}")
+                if self._window:
+                    msg_js = json.dumps("导入失败", ensure_ascii=False)
+                    self._window.evaluate_js(
+                        f"if(window.MinimalistLoading) MinimalistLoading.update(100, {msg_js})"
+                    )
+            finally:
+                self._is_busy = False
+
+        t = threading.Thread(target=_run)
+        t.daemon = True
+        t.start()
+        return True
+
+
+    def refresh_skins_async(self, opts=None):
+        """
+        先传回基本信息，再异步推送封面数据。
+        """
+        game_path = self._cfg_mgr.get_game_path()
+        valid, _ = self._logic.validate_game_path(game_path)
+        if not valid:
+            return False
+
         force_refresh = False
         if isinstance(opts, dict):
             force_refresh = bool(opts.get("force_refresh"))
-        data = self._skins_mgr.scan_userskins(
-            path, default_cover_path=default_cover_path, force_refresh=force_refresh
-        )
+
+        def _worker():
+            try:
+                default_cover_path = WEB_DIR / "assets" / "card_image_small.png"
+                data = self._skins_mgr.scan_userskins(
+                    game_path, default_cover_path=default_cover_path, 
+                    force_refresh=force_refresh, skip_covers=True
+                )
+                data["valid"] = True
+                
+                # 推送基本列表到前端，让界面先渲染出来
+                if self._window:
+                    js_data = json.dumps(data, ensure_ascii=False)
+                    self._window.evaluate_js(f"if(app.onSkinsListReady) app.onSkinsListReady({js_data})")
+
+                items = data.get("items", [])
+                for it in items:
+                    name = it.get("name")
+                    preview_path = it.get("preview_path")
+                    cover_url = ""
+                    
+                    if preview_path and Path(preview_path).exists():
+                        cover_url = self._skins_mgr._to_data_url(Path(preview_path))
+                    elif default_cover_path.exists():
+                        cover_url = self._skins_mgr._to_data_url(default_cover_path)
+
+                    if self._window and cover_url:
+                        # 单条推送，避免大数据包造成的卡顿
+                        name_js = json.dumps(name, ensure_ascii=False)
+                        url_js = json.dumps(cover_url, ensure_ascii=True)
+                        self._window.evaluate_js(f"if(app.onSkinCoverReady) app.onSkinCoverReady({name_js}, {url_js})")
+            except Exception as e:
+                log.error(f"后台刷新涂装库失败: {e}")
+
+        threading.Thread(target=_worker, daemon=True).start()
+        return True
+
+    def get_skins_list(self, opts=None):
+        # 保留原接口供兼容，但实际上前端将改用 refresh_skins_async
+        path = self._cfg_mgr.get_game_path()
+        default_cover_path = WEB_DIR / "assets" / "card_image_small.png"
+        force_refresh = bool(opts.get("force_refresh")) if opts else False
+        data = self._skins_mgr.scan_userskins(path, default_cover_path, force_refresh)
         data["valid"] = True
-        data["msg"] = ""
         return data
 
     def import_skin_zip_dialog(self):
@@ -907,17 +1174,12 @@ class AppApi:
             if not mod_path.exists():
                 return []
 
-            # 遍历将要安装的目录集合，收集目标文件名列表
+            # install_list 现在是文件路径列表，直接提取文件名
             files_to_install = []
-            for folder_rel_path in install_list:
-                if folder_rel_path == "根目录":
-                    src_dir = mod_path
-                else:
-                    src_dir = mod_path / folder_rel_path
-                if src_dir.exists():
-                    for root, dirs, files in os.walk(src_dir):
-                        for file in files:
-                            files_to_install.append(file)
+            for file_rel_path in install_list:
+                # 只提取文件名
+                file_name = Path(file_rel_path).name
+                files_to_install.append(file_name)
 
             # 调用 manifest_mgr 进行冲突检测
             if self._logic.manifest_mgr:
@@ -939,7 +1201,7 @@ class AppApi:
             library_dir = Path(self._lib_mgr.library_dir).resolve()
             target = (library_dir / str(mod_name)).resolve()
             if os.path.commonpath([str(target), str(library_dir)]) != str(
-                library_dir
+                    library_dir
             ) or str(target) == str(library_dir):
                 raise Exception("非法路径")
             shutil.rmtree(target)
@@ -1040,7 +1302,6 @@ class AppApi:
             return []
 
         theme_list = []
-        # 遍历 json 文件
         for file in themes_dir.glob("*.json"):
             try:
                 data = self._load_json_with_fallback(file)
@@ -1056,7 +1317,7 @@ class AppApi:
                     )
             except Exception as e:
                 log.error(f"读取主题 {file.name} 失败: {e}")
-        
+
         return theme_list
 
     def load_theme_content(self, filename):
@@ -1086,7 +1347,7 @@ class AppApi:
         except Exception as e:
             log.error(f"搜索 UserSights 路径失败: {e}")
             return []
-    
+
     def select_uid_sights_path(self, uid):
         """根据 UID 选择并设置对应的 UserSights 路径"""
         try:
@@ -1498,7 +1759,9 @@ def main() -> int:
 
     # 绑定窗口对象到桥接层
     api.set_window(window)
+    
 
+    # TODO 需要优化，拖放压缩包时大概率卡死
     def _bind_drag_drop(win):
         # 绑定拖拽投放事件，用于在特定页面接收文件拖入并触发导入流程。
         try:
@@ -1507,54 +1770,81 @@ def main() -> int:
             log.debug("DOMEventHandler 不可用，略过拖放绑定")
             return
 
+
         def on_drop(e):
-            try:
-                active_page = win.evaluate_js(
-                    "(document.querySelector('.page.active')||{}).id || ''"
-                )
-            except Exception:
-                active_page = ""
-
-            if active_page != "page-camo":
-                return
-
-            try:
-                files = (e.get("dataTransfer", {}) or {}).get("files", []) or []
-            except Exception:
-                files = []
-
-            full_paths = []
-            for f in files:
+            def _async_processor():
                 try:
-                    p = f.get("pywebviewFullPath")
-                except Exception:
-                    p = None
-                if p:
-                    full_paths.append(p)
+                    win.evaluate_js("if(window.app && app.hideDropOverlay) app.hideDropOverlay()")
 
-            if not full_paths:
-                return
+                    try:
+                        active_page = win.evaluate_js("(document.querySelector('.page.active')||{}).id || ''")
+                    except Exception:
+                        active_page = ""
 
-            zip_files = [p for p in full_paths if str(p).lower().endswith(".zip")]
-            if not zip_files:
-                return
+                    allowed_pages = ["page-home", "page-lib", "page-camo", "page-sight"]
+                    if not active_page or active_page not in allowed_pages:
+                        return
 
-            for zp in zip_files[:1]:
-                th = threading.Thread(target=api.import_skin_zip_from_path, args=(zp,))
-                th.daemon = True
-                th.start()
+                    if active_page == "page-home":
+                        win.evaluate_js("app.switchTab('lib')")
+                        active_page = "page-lib"
+
+                    # 提取文件路径
+                    try:
+                        data_tx = e.get("dataTransfer") or {}
+                        files = data_tx.get("files") or []
+                    except Exception:
+                        files = []
+
+                    full_paths = []
+                    for f in files:
+                        p = f.get("pywebviewFullPath")
+                        if p:
+                            full_paths.append(str(p))
+
+                    if not full_paths:
+                        return
+
+                    archive_exts = (".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".tbz2")
+                    zip_files = [p for p in full_paths if p.lower().endswith(archive_exts)]
+                    if not zip_files:
+                        return
+
+                    zp = zip_files[0]
+                    
+                    if active_page == "page-lib":
+                        api.import_voice_zip_from_path(zp)
+                    elif active_page == "page-camo":
+                        try:
+                            res_view = win.evaluate_js(
+                                "(document.querySelector('#page-camo .resource-nav-item.active')||{}).dataset.target || 'skins'"
+                            )
+                        except Exception:
+                            res_view = "skins"
+                        
+                        if res_view == "sights":
+                            api.import_sights_zip_from_path(zp)
+                        else:
+                            api.import_skin_zip_from_path(zp)
+                    elif active_page == "page-sight":
+                        api.import_sights_zip_from_path(zp)
+
+                except Exception as ex:
+                    log.error(f"拖拽处理发生异常: {ex}", exc_info=True)
+
+            threading.Thread(target=_async_processor, daemon=True).start()
 
         try:
-            win.dom.document.events.drop += DOMEventHandler(on_drop, True, True)
+            win.dom.document.events.drop += DOMEventHandler(on_drop, True, False)
         except Exception:
             log.debug("绑定拖放事件失败", exc_info=True)
             return
 
     def _on_start(win):
-        try:
-            _bind_drag_drop(win)
-        except Exception:
-            log.exception("_bind_drag_drop 失败")
+        # try:
+        #     _bind_drag_drop(win)
+        # except Exception:
+        #     log.exception("_bind_drag_drop 失败")
 
         # 部分 GUI 后端可能忽略 create_window 的 x/y；启动后补一次置中
         try:

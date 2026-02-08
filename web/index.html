@@ -97,6 +97,15 @@
     </header>
 
     <div class="main-container">
+        <!-- 拖放文件时的浮层 -->
+        <div id="drop-overlay" class="drop-overlay">
+            <div class="drop-overlay-content">
+                <i class="ri-file-zip-line drop-overlay-icon"></i>
+                <div class="drop-overlay-text">放下并导入语音包</div>
+                <div style="font-size: 14px; color: var(--text-sec);">支持 ZIP / RAR / 7Z 等格式</div>
+            </div>
+        </div>
+
 
         <div id="page-home" class="page active">
             <div class="home-grid">
@@ -309,10 +318,12 @@
                                                     选择用户 UID
                                                 </label>
                                                 <div class="uid-selector-row">
-                                                    <select id="sights-uid-select" class="uid-select" onchange="app.onSightsUidChange(this.value)">
+                                                    <select id="sights-uid-select" class="uid-select"
+                                                        onchange="app.onSightsUidChange(this.value)">
                                                         <option value="">-- 自动搜索中 --</option>
                                                     </select>
-                                                    <button class="btn-v2 icon-only" onclick="app.refreshSightsUidList()" title="刷新 UID 列表">
+                                                    <button class="btn-v2 icon-only"
+                                                        onclick="app.refreshSightsUidList()" title="刷新 UID 列表">
                                                         <i class="ri-refresh-line"></i>
                                                     </button>
                                                 </div>
@@ -674,6 +685,21 @@
                             style="width: 100%;">
                             <option value="default.json">默认主题 (Default)</option>
                         </select>
+
+                        <div style="height: 1px; background: var(--border-color); margin: 20px 0; opacity: 0.5;"></div>
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <div>
+                                <div
+                                    style="font-weight: 600; font-size: 14px; margin-bottom: 4px; color: var(--text-main);">
+                                    加入用户体验改善计划</div>
+                                <div style="font-size: 12px; color: var(--text-sec);">允许发送匿名使用数据以改进软件</div>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="telemetry-switch"
+                                    onchange="app.toggleTelemetry(this.checked)">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
                     </div>
                 </div>
 
@@ -710,7 +736,8 @@
                             <div class="path-input-wrapper">
                                 <input type="text" id="pending-dir-input" class="path-input" readonly
                                     placeholder="使用默认路径">
-                                <button class="path-copy-btn" onclick="app.copyPathToClipboard('pending-dir-input')" title="复制路径">
+                                <button class="path-copy-btn" onclick="app.copyPathToClipboard('pending-dir-input')"
+                                    title="复制路径">
                                     <i class="ri-file-copy-line"></i>
                                 </button>
                             </div>
@@ -737,7 +764,8 @@
                             <div class="path-input-wrapper">
                                 <input type="text" id="library-dir-input" class="path-input" readonly
                                     placeholder="使用默认路径">
-                                <button class="path-copy-btn" onclick="app.copyPathToClipboard('library-dir-input')" title="复制路径">
+                                <button class="path-copy-btn" onclick="app.copyPathToClipboard('library-dir-input')"
+                                    title="复制路径">
                                     <i class="ri-file-copy-line"></i>
                                 </button>
                             </div>
@@ -1069,8 +1097,13 @@
                     <li>用户导入的语音包内容及其版权归属原作者。</li>
                     <li>用户应确保使用的语音包内容合法合规，不侵犯他人权益。</li>
                 </ul>
-
-                <h4>8. 免责更新</h4>
+                <h4>8. 隐私说明</h4>
+                <ul>
+                    <li>软件已更新遥测功能，用于收集软件使用情况，以改进软件性能和用户体验。</li>
+                    <li>遥测数据不包含任何用户隐私数据，且仅用于软件改进，不会用于其他目的。</li>
+                    <li>用户可以随时在软件设置中关闭遥测功能。</li>
+                </ul>
+                <h4>9. 免责更新</h4>
                 <p>开发者保留随时修改本免责声明的权利，修改后的声明自发布之日起生效。</p>
                 <p class="text-muted" style="margin-top: 20px; text-align: right;">最后更新日期：2026年1月10日</p>
             </div>
@@ -1137,7 +1170,11 @@
             <p id="alert-message"
                 style="margin-bottom: 24px; color: var(--text-sec); font-size: 14px; line-height: 1.6;"></p>
 
-            <div class="modal-actions" style="justify-content: center;">
+            <div class="modal-actions" style="justify-content: center; gap: 12px;">
+                <button class="btn secondary" id="alert-link-btn" style="display: none;"
+                    onclick="app.openExternal(this.dataset.url); app.closeModal('modal-alert')">
+                    <i class="ri-download-cloud-2-line"></i> 前往下载
+                </button>
                 <button class="btn primary" onclick="app.closeModal('modal-alert')" style="min-width: 120px;">
                     <i class="ri-check-line"></i> 知道了
                 </button>
