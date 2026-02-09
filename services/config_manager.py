@@ -50,7 +50,21 @@ def _get_default_config_dir():
 
     if system == "Windows":
         # Windows: 用户文档目录
-        config_base = Path.home() / "Documents" / "Aimer_WT"
+        try:
+            import ctypes.wintypes
+            buf = ctypes.create_unicode_buffer(ctypes.wintypes.MAX_PATH)
+            # CSIDL_PERSONAL = 5 (My Documents), SHGFP_TYPE_CURRENT = 0
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf) != 0:
+                raise OSError("无法通过 Windows API 获取文档路径")
+
+            if not buf.value:
+                raise OSError("获取到的 Windows 文档路径为空")
+
+            config_base = Path(buf.value) / "Aimer_WT"
+        except Exception as e:
+            log.warning(f"获取 Windows 文档目录失败，略过默认搜索路径: {e}")
+            config_base = Path.home() / "Documents" / "Aimer_WT"
+
     elif system == "Darwin":
         # macOS: Application Support 目录
         config_base = Path.home() / "Library" / "Application Support" / "Aimer_WT"
@@ -117,7 +131,6 @@ class ConfigManager:
         """初始化配置管理器，加载或创建配置文件。"""
         self.config_dir = DOCS_DIR
         self.config_file = CONFIG_FILE
-
         # 初始化默认配置并尝试从 settings.json 加载复盖
         self.config = self.DEFAULT_CONFIG.copy()
         self.load_config()
